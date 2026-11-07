@@ -13,3 +13,4 @@
 - [x] Compilación limpia de TypeScript y bundle de producción (`npm run build`).
 - [ ] Ejecución de `db/migrations/001_solger_schema.sql` en el SQL Editor de Supabase (schema `solger` expuesto en Settings -> API).
 - [ ] Ejecución de `python backend/sync_and_estimate.py --months 4` para poblar `solger.planta` y `solger.kpi_diario` y calcular los `kWp` históricos.
+

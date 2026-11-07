@@ -174,3 +174,4 @@ def auto_sync_plants(plants: list[dict[str, Any]]) -> list[dict[str, Any]]:
         enriched.append(item)
 
     return enriched
+

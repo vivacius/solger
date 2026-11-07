@@ -48,3 +48,4 @@ Este documento define las reglas arquitectónicas, de dominio energético y de f
    - `feat/<nombre-corto>` o `fix/<nombre-corto>`: ramas de trabajo por bloque funcional, integradas mediante merge estructurado y plantilla `.github/pull_request_template.md`.
 3. **Seguridad de Secretos**:
    - `.env` nunca se versiona en Git. Solo `.env.example` forma parte del repositorio.
+

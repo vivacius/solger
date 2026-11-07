@@ -18,3 +18,4 @@
 ## 4. Criterios de Aceptación y Validación Física
 - [ ] Cumple `constitution.md` (Huawei health states, IEC 61724, UPME CO₂, schema `solger`).
 - [ ] Prueba verificable: ...
+

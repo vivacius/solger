@@ -12,7 +12,7 @@ import time
 from datetime import datetime, date
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -22,6 +22,7 @@ import kpi as kpi_domain
 import market as market_svc
 import invoice_store
 import supabase_store
+import celsia_parser
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -356,10 +357,34 @@ class InvoiceCreate(BaseModel):
     plant_code: str
     plant_name: str
     period: str            # "YYYY-MM"
+    period_start: str | None = None  # "YYYY-MM-DD" (inicio ciclo lectura Celsia)
+    period_end: str | None = None    # "YYYY-MM-DD" (fin ciclo lectura Celsia)
+    days_billed: int | None = None
+    account_code: str | None = None
+    invoice_number: str | None = None
+    meter_number: str | None = None
     kwh_billed: float
     price_cop_kwh: float
     total_cop: float
+    componentes_cu: dict[str, float] | None = None
     notes: str = ""
+
+
+@app.post("/api/invoices/parse-pdf", tags=["Facturación"])
+async def parse_invoice_pdf(file: UploadFile = File(...)) -> dict[str, Any]:
+    """
+    Extrae automáticamente los campos de un PDF de factura electrónica de Celsia:
+    ciclo exacto de lectura (ej. 24/SEP/2026 - 26/OCT/2026), lecturas de medidor,
+    kWh facturados, Costo Unitario CU ($/kWh) y desglose de componentes (G, C, T, D, PR, R).
+    """
+    pdf_bytes = await file.read()
+    if not pdf_bytes:
+        raise HTTPException(status_code=400, detail="Archivo PDF vacío.")
+    try:
+        parsed = celsia_parser.parse_celsia_pdf(pdf_bytes)
+        return {"success": True, "parsed": parsed}
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"No se pudo interpretar el PDF: {exc}")
 
 
 @app.get("/api/invoices", tags=["Facturación"])
@@ -381,11 +406,12 @@ def verify_invoice(
     invoice_id: str,
     fusion_kwh: float | None = Query(
         default=None,
-        description="Opcional: si se omite, el backend consulta FusionSolar directamente.",
+        description="Opcional: si se omite, el backend consulta FusionSolar en el ciclo exacto de la factura.",
     ),
 ) -> dict[str, Any]:
     """
-    Cruza los kWh del recibo contra los datos mensuales de FusionSolar.
+    Cruza los kWh del recibo contra los datos de FusionSolar en el ciclo exacto de facturación
+    (period_start .. period_end, ej. 24/SEP al 26/OCT) o en el mes calendario si no hay ciclo.
     Extrae generación de inversor (inverter_power / PVYield), exportación (ongrid_power)
     e importación (buyPower) desde getKpiStationDay, nunca radiation_power (irradiación).
     """
@@ -398,22 +424,38 @@ def verify_invoice(
     gen_kwh = 0.0
 
     if fusion_kwh is None:
-        month_str = str(inv.get("period", "")).replace("-", "")
         plant_code = str(inv.get("plant_code", ""))
+        p_start = inv.get("period_start")
+        p_end = inv.get("period_end")
+        if p_start and p_end:
+            months_to_query = sorted({p_start[:7].replace("-", ""), p_end[:7].replace("-", "")})
+        else:
+            months_to_query = [str(inv.get("period", "")).replace("-", "")]
+
         try:
-            month_data = fusion_client.get_station_kpi_month(plant_code, month_str)
-            rows = month_data.get("data", []) or []
-            for row in rows:
-                dim = row.get("dataItemMap") or {}
-                gen_kwh += float(
-                    dim.get("inverter_power")
-                    or dim.get("inverterYield")
-                    or dim.get("PVYield")
-                    or 0.0
-                )
-                export_kwh += float(dim.get("ongrid_power") or 0.0)
-                import_kwh += float(dim.get("buyPower") or dim.get("buy_power") or 0.0)
-            # Usar exportación si existe medidor bidireccional con lecturas; si no, generación
+            for month_str in months_to_query:
+                if not month_str:
+                    continue
+                month_data = fusion_client.get_station_kpi_month(plant_code, month_str)
+                rows = month_data.get("data", []) or []
+                for row in rows:
+                    collect_ms = row.get("collectTime")
+                    if collect_ms and p_start and p_end:
+                        row_date = datetime.fromtimestamp(
+                            collect_ms / 1000.0, tz=BOGOTA_TZ
+                        ).strftime("%Y-%m-%d")
+                        if not (p_start <= row_date <= p_end):
+                            continue
+                    dim = row.get("dataItemMap") or {}
+                    gen_kwh += float(
+                        dim.get("inverter_power")
+                        or dim.get("inverterYield")
+                        or dim.get("PVYield")
+                        or 0.0
+                    )
+                    export_kwh += float(dim.get("ongrid_power") or 0.0)
+                    import_kwh += float(dim.get("buyPower") or dim.get("buy_power") or 0.0)
+            # Usar exportación o importación según medidor bidireccional; respaldo en generación
             fusion_kwh = export_kwh if export_kwh > 0 else gen_kwh
         except Exception as exc:
             _handle_fusion_errors(exc)

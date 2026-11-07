@@ -18,3 +18,4 @@ SOLGER instala y opera plantas solares fotovoltaicas para clientes agroindustria
 - **RF-04 (Detección Estadística de Anomalías)**: Evaluar cada planta por reglas duras, residuo respecto al esperado físico, ratio frente a la mediana del portafolio y z-score robusto / EWMA.
 - **RF-05 (Conciliación de Recibos)**: Extraer `inverter_power`/`PVYield`, `ongrid_power` y `buyPower` desde el backend para verificar facturas.
 - **RF-06 (Despliegue Vercel)**: Proveer `vercel.json` y `api/index.py` para servir el frontend estático y las rutas `/api/*`.
+

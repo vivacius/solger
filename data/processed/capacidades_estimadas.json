@@ -1,0 +1,198 @@
+{
+  "generated_at": "2026-11-07T15:26:26.610295-05:00",
+  "months_analyzed": [
+    "202609",
+    "202610",
+    "202611"
+  ],
+  "plants": {
+    "NE=33795881": {
+      "plant_code": "NE=33795881",
+      "plant_name": "HDA LA CRUZ POZO 3",
+      "kwp_nominal": 83.52,
+      "kwp_effective": 83.52,
+      "is_estimated": false,
+      "kwp_estimated": 103.07,
+      "e_p90_kwh": 439.47,
+      "e_median_kwh": 342.51,
+      "sample_days": 44,
+      "method": "p90_daily_yield"
+    },
+    "NE=37308996": {
+      "plant_code": "NE=37308996",
+      "plant_name": "SUPER GRANOS",
+      "kwp_nominal": 0.0,
+      "kwp_effective": 0.0,
+      "is_estimated": false,
+      "kwp_estimated": null,
+      "sample_days": 0,
+      "method": "insufficient_history"
+    },
+    "NE=33744070": {
+      "plant_code": "NE=33744070",
+      "plant_name": "SAN FELIPE - QUANTUM",
+      "kwp_nominal": 145.2,
+      "kwp_effective": 145.2,
+      "is_estimated": false,
+      "kwp_estimated": 154.07,
+      "e_p90_kwh": 656.96,
+      "e_median_kwh": 542.47,
+      "sample_days": 68,
+      "method": "p90_daily_yield"
+    },
+    "NE=33983774": {
+      "plant_code": "NE=33983774",
+      "plant_name": "BURRERA",
+      "kwp_nominal": 0.0,
+      "kwp_effective": 121.84,
+      "is_estimated": true,
+      "kwp_estimated": 121.84,
+      "e_p90_kwh": 519.54,
+      "e_median_kwh": 464.35,
+      "sample_days": 68,
+      "method": "p90_daily_yield"
+    },
+    "NE=35502362": {
+      "plant_code": "NE=35502362",
+      "plant_name": "ANTOJO",
+      "kwp_nominal": 0.0,
+      "kwp_effective": 123.22,
+      "is_estimated": true,
+      "kwp_estimated": 123.22,
+      "e_p90_kwh": 525.43,
+      "e_median_kwh": 441.16,
+      "sample_days": 55,
+      "method": "p90_daily_yield"
+    },
+    "NE=33790681": {
+      "plant_code": "NE=33790681",
+      "plant_name": "HDA LA CRUZ POZO 2",
+      "kwp_nominal": 83.52,
+      "kwp_effective": 83.52,
+      "is_estimated": false,
+      "kwp_estimated": null,
+      "sample_days": 0,
+      "method": "insufficient_history"
+    },
+    "NE=33777835": {
+      "plant_code": "NE=33777835",
+      "plant_name": "HDA LA CRUZ POZO 1",
+      "kwp_nominal": 83.52,
+      "kwp_effective": 83.52,
+      "is_estimated": false,
+      "kwp_estimated": 92.27,
+      "e_p90_kwh": 393.42,
+      "e_median_kwh": 331.73,
+      "sample_days": 68,
+      "method": "p90_daily_yield"
+    },
+    "NE=33879854": {
+      "plant_code": "NE=33879854",
+      "plant_name": "MOLINO SAN GERARDO",
+      "kwp_nominal": 0.0,
+      "kwp_effective": 225.23,
+      "is_estimated": true,
+      "kwp_estimated": 225.23,
+      "e_p90_kwh": 960.37,
+      "e_median_kwh": 791.83,
+      "sample_days": 68,
+      "method": "p90_daily_yield"
+    },
+    "NE=34035592": {
+      "plant_code": "NE=34035592",
+      "plant_name": "RIO GUACHAL",
+      "kwp_nominal": 0.0,
+      "kwp_effective": 118.54,
+      "is_estimated": true,
+      "kwp_estimated": 118.54,
+      "e_p90_kwh": 505.45,
+      "e_median_kwh": 449.39,
+      "sample_days": 60,
+      "method": "p90_daily_yield"
+    },
+    "NE=33731244": {
+      "plant_code": "NE=33731244",
+      "plant_name": "HDA PASO ANCHO",
+      "kwp_nominal": 122.0,
+      "kwp_effective": 122.0,
+      "is_estimated": false,
+      "kwp_estimated": 131.75,
+      "e_p90_kwh": 474.3,
+      "e_median_kwh": 474.3,
+      "sample_days": 7,
+      "method": "provisional_month_yield"
+    },
+    "NE=52329050": {
+      "plant_code": "NE=52329050",
+      "plant_name": "La unión",
+      "kwp_nominal": 0.0,
+      "kwp_effective": 29.53,
+      "is_estimated": true,
+      "kwp_estimated": 29.53,
+      "e_p90_kwh": 106.3,
+      "e_median_kwh": 106.3,
+      "sample_days": 7,
+      "method": "provisional_month_yield"
+    },
+    "NE=34081254": {
+      "plant_code": "NE=34081254",
+      "plant_name": "HERRAGRICOLA",
+      "kwp_nominal": 0.0,
+      "kwp_effective": 330.41,
+      "is_estimated": true,
+      "kwp_estimated": 330.41,
+      "e_p90_kwh": 1189.49,
+      "e_median_kwh": 1189.49,
+      "sample_days": 7,
+      "method": "provisional_month_yield"
+    },
+    "NE=33752521": {
+      "plant_code": "NE=33752521",
+      "plant_name": "HACIENDA LA ESTANCIA",
+      "kwp_nominal": 145.2,
+      "kwp_effective": 145.2,
+      "is_estimated": false,
+      "kwp_estimated": 139.52,
+      "e_p90_kwh": 502.26,
+      "e_median_kwh": 502.26,
+      "sample_days": 7,
+      "method": "provisional_month_yield"
+    },
+    "NE=35975392": {
+      "plant_code": "NE=35975392",
+      "plant_name": "PICHINDE",
+      "kwp_nominal": 0.0,
+      "kwp_effective": 115.74,
+      "is_estimated": true,
+      "kwp_estimated": 115.74,
+      "e_p90_kwh": 416.66,
+      "e_median_kwh": 416.66,
+      "sample_days": 7,
+      "method": "provisional_month_yield"
+    },
+    "NE=33945451": {
+      "plant_code": "NE=33945451",
+      "plant_name": "HDA MONICA",
+      "kwp_nominal": 0.0,
+      "kwp_effective": 136.83,
+      "is_estimated": true,
+      "kwp_estimated": 136.83,
+      "e_p90_kwh": 492.6,
+      "e_median_kwh": 492.6,
+      "sample_days": 7,
+      "method": "provisional_month_yield"
+    },
+    "NE=35899144": {
+      "plant_code": "NE=35899144",
+      "plant_name": "LA ESPERANZA 2",
+      "kwp_nominal": 0.0,
+      "kwp_effective": 105.71,
+      "is_estimated": true,
+      "kwp_estimated": 105.71,
+      "e_p90_kwh": 380.56,
+      "e_median_kwh": 380.56,
+      "sample_days": 7,
+      "method": "provisional_month_yield"
+    }
+  }
+}

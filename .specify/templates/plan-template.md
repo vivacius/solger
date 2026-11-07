@@ -12,3 +12,4 @@
 - [ ] Build TypeScript (`npm run build`)
 - [ ] Validación de endpoints FastAPI
 - [ ] Sincronización en Supabase (`solger`)
+
