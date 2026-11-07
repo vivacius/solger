@@ -337,7 +337,7 @@ def create_work_order(data: dict[str, Any]) -> dict[str, Any] | None:
 def sync_invoice_to_supabase(invoice: dict[str, Any]) -> None:
     """
     Sincroniza un recibo creado o verificado hacia `solger.recibo` y `solger.conciliacion`.
-    Usa las columnas estándar de la migración 001 para garantizar compatibilidad inmediata.
+    Usa las columnas exactas de `001_solger_schema.sql` para garantizar compatibilidad inmediata.
     """
     if not is_configured():
         return
@@ -355,12 +355,15 @@ def sync_invoice_to_supabase(invoice: dict[str, Any]) -> None:
         "id": invoice["id"],
         "planta_id": planta_id,
         "comercializador": invoice.get("company", "Celsia"),
-        "periodo_inicio": p_start,
-        "periodo_fin": p_end,
-        "kwh_exportados_facturados": float(invoice.get("kwh_billed") or 0),
-        "tarifa_cu_aplicada": float(invoice.get("price_cop_kwh") or 0),
-        "total_factura_cop": float(invoice.get("total_cop") or 0),
-        "estado_extraccion": "verificado" if invoice.get("status") in ("ok", "discrepancy", "critical") else "pendiente",
+        "periodo": period,
+        "fecha_inicio_ciclo": p_start,
+        "fecha_fin_ciclo": p_end,
+        "kwh_neto_facturado": float(invoice.get("kwh_billed") or 0),
+        "cu_cop_kwh": float(invoice.get("price_cop_kwh") or 0),
+        "componentes_cu": invoice.get("componentes_cu") or {},
+        "total_cop": float(invoice.get("total_cop") or 0),
+        "origen": "ocr" if invoice.get("invoice_number") or invoice.get("account_code") else "manual",
+        "notas": invoice.get("notes") or f"Cuenta {invoice.get('account_code', '')} Factura {invoice.get('invoice_number', '')}".strip(),
     }
     try:
         base = f"{settings.SUPABASE_URL}/rest/v1"
@@ -372,20 +375,18 @@ def sync_invoice_to_supabase(invoice: dict[str, Any]) -> None:
         )
         if r.status_code in (200, 201) and invoice.get("fusion_kwh") is not None:
             fusion_kwh = float(invoice.get("fusion_kwh") or 0)
-            billed_kwh = float(invoice.get("kwh_billed") or 0)
             diff_kwh = float(invoice.get("difference_kwh") or 0)
             diff_pct = round(abs(diff_kwh / fusion_kwh * 100), 2) if fusion_kwh > 0 else 0.0
             concil_payload = {
                 "recibo_id": invoice["id"],
-                "planta_id": planta_id,
-                "kwh_generados_fs": float(invoice.get("gen_kwh") or fusion_kwh),
-                "kwh_exportados_fs": float(invoice.get("export_kwh") or fusion_kwh),
-                "kwh_importados_fs": float(invoice.get("import_kwh") or 0),
-                "diferencia_export_kwh": diff_kwh,
-                "diferencia_export_pct": diff_pct,
-                "diferencia_cop": float(invoice.get("difference_cop") or 0),
+                "gen_fs_kwh": float(invoice.get("gen_kwh") or fusion_kwh),
+                "export_fs_kwh": float(invoice.get("export_kwh") or fusion_kwh),
+                "import_fs_kwh": float(invoice.get("import_kwh") or 0),
+                "dif_kwh": diff_kwh,
+                "dif_pct": diff_pct,
+                "dif_cop": float(invoice.get("difference_cop") or 0),
                 "estado": invoice.get("status", "ok"),
-                "notas": invoice.get("notes") or f"Cuenta {invoice.get('account_number', '')} Factura {invoice.get('invoice_number', '')}".strip(),
+                "explicacion": invoice.get("notes") or f"Verificado contra ciclo {p_start} a {p_end}",
             }
             requests.post(
                 f"{base}/conciliacion?on_conflict=recibo_id",

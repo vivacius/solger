@@ -105,7 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const profRes = await fetch(
-          `${supabaseUrl}/rest/v1/usuario_perfil?id=eq.${supaUser.id}&select=*`,
+          `${supabaseUrl}/rest/v1/usuario_perfil?user_id=eq.${supaUser.id}&select=*`,
           {
             headers: {
               apikey: supabaseAnonKey,
@@ -160,3 +160,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export function useAuth() {
   return useContext(AuthContext);
 }
+
