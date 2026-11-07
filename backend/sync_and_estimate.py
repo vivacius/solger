@@ -1,26 +1,24 @@
 """
-SOLGER — Backfill Histórico, Estimación de kWp por Histórico (P90) y Sincronización con Supabase.
+SOLGER — Backfill Histórico en Lote (Batch), Estimación de kWp (P90) y Sincronización con Supabase.
 
 Uso:
-    python backend/sync_and_estimate.py --months 6
+    python backend/sync_and_estimate.py --months 3
 
-Qué hace:
-1. Consulta la lista de plantas en FusionSolar.
-2. Descarga los KPIs diarios (`getKpiStationDay`) de los últimos N meses para cada planta,
-   respetando la tasa de límite de FusionSolar (1 req/s).
-3. Para las plantas sin capacidad configurada (`capacity <= 0`), estima sus kWp DC
-   usando el percentil 90 de su generación diaria histórica:
-       kWp_est = P90(E_diaria) / (HSP_p90 * PR_limpio)
-   Esto evita la circularidad de estimar con la generación del mismo día.
-4. Guarda las capacidades estimadas y series diarias en `data/processed/capacidades_estimadas.json`
-   y, si `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` están configurados en `.env`,
-   sincroniza las plantas, capacidades estimadas, KPIs diarios y anomalías en el schema `solger`.
+Optimización clave contra el límite de frecuencia (failCode 407) de Huawei FusionSolar:
+- Consulta `/thirdData/getKpiStationDay` enviando todos los `stationCodes` separados por coma
+  en **1 sola petición HTTP por mes** (en lugar de 16 peticiones por mes).
+- Es incremental y reanudable: conserva las estimaciones P90 ya calculadas en
+  `data/processed/capacidades_estimadas.json` y en `solger.planta`.
+- Si una planta activa tiene `capacity = 0` y la cuota diaria de `getKpiStationDay` está en
+  enfriamiento temporal (407), calcula un estimado provisional desde `getStationRealKpi`
+  (`month_power` / `day_power`) marcado como `provisional_real_kpi` hasta la siguiente corrida.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,7 +28,6 @@ import requests
 from config import settings
 from fusionsolar import BOGOTA_TZ, fusion_client
 import kpi as kpi_domain
-import anomalies as anomaly_engine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,7 +76,6 @@ def sync_to_supabase(
     base = f"{settings.SUPABASE_URL.rstrip('/')}/rest/v1"
     headers = _supabase_headers()
 
-    # 1. Obtener org_id de SOLGER
     r_org = requests.get(f"{base}/organizacion?nombre=eq.SOLGER&select=id", headers=headers, timeout=20)
     r_org.raise_for_status()
     orgs = r_org.json()
@@ -90,7 +86,6 @@ def sync_to_supabase(
     else:
         org_id = orgs[0]["id"]
 
-    # 2. Upsert de plantas con capacidad nominal y estimada por histórico
     plant_rows = []
     for p in plants:
         code = p["plantCode"]
@@ -104,12 +99,13 @@ def sync_to_supabase(
             "nombre": p.get("plantName", code),
             "kwp_dc_nominal": nom_cap,
             "kwp_dc_estimado": est_cap,
-            "metodo_estimacion_kwp": "fusionsolar" if nom_cap > 0 else est_info.get("method", "p90_historico"),
+            "metodo_estimacion_kwp": "fusionsolar" if nom_cap > 0 else est_info.get("method", "p90_daily_yield"),
             "kwp_actualizado_en": datetime.now(BOGOTA_TZ).isoformat(),
             "latitud": float(p["latitude"]) if p.get("latitude") else None,
             "longitud": float(p["longitude"]) if p.get("longitude") else None,
             "direccion": p.get("plantAddress"),
             "fecha_conexion": str(p.get("gridConnectionDate"))[:10] if p.get("gridConnectionDate") else None,
+            "ultima_sincronizacion_fs": datetime.now(BOGOTA_TZ).isoformat(),
         })
 
     r_pl = requests.post(
@@ -122,7 +118,6 @@ def sync_to_supabase(
     db_plants = {row["fs_plant_code"]: row["id"] for row in r_pl.json()}
     logger.info("Sincronizadas %d plantas en schema '%s'.", len(db_plants), settings.DB_SCHEMA)
 
-    # 3. Upsert de kpi_diario
     kpi_rows = []
     for code, records in daily_records_by_plant.items():
         planta_id = db_plants.get(code)
@@ -152,29 +147,55 @@ def sync_to_supabase(
     logger.info("Sincronizados %d registros de kpi_diario en Supabase.", len(kpi_rows))
 
 
-def run_backfill_and_estimate(n_months: int = 4) -> dict[str, Any]:
+def run_backfill_and_estimate(n_months: int = 3) -> dict[str, Any]:
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    existing_estimates: dict[str, dict] = {}
+    if ESTIMATED_CAPS_FILE.exists():
+        try:
+            existing_estimates = json.loads(ESTIMATED_CAPS_FILE.read_text(encoding="utf-8")).get("plants") or {}
+        except Exception:
+            existing_estimates = {}
+
     plants_resp = fusion_client.get_plant_list()
     plants = plants_resp.get("data", {}).get("list", [])
+    all_codes = [p["plantCode"] for p in plants]
+
+    # Consultar KPIs en tiempo real (1 sola petición para todas las plantas)
+    real_kpi_map: dict[str, dict] = {}
+    try:
+        rk_resp = fusion_client.get_station_real_kpi(all_codes)
+        for item in rk_resp.get("data") or []:
+            c = item.get("stationCode") or item.get("plantCode")
+            if c:
+                real_kpi_map[c] = item.get("dataItemMap") or {}
+    except Exception as exc:
+        logger.warning("No se pudo obtener getStationRealKpi: %s", exc)
+
     months = _recent_months(n_months)
-    logger.info("Descargando histórico de %d plantas para los meses %s...", len(plants), months)
+    pending_codes = [
+        p["plantCode"]
+        for p in plants
+        if not (existing_estimates.get(p["plantCode"], {}).get("sample_days", 0) >= 30)
+    ]
 
-    daily_records_by_plant: dict[str, list[dict]] = {}
-    estimates: dict[str, dict] = {}
+    daily_records_by_plant: dict[str, list[dict]] = {c: [] for c in all_codes}
 
-    for p in plants:
-        code = p["plantCode"]
-        name = p.get("plantName", code)
-        nom_cap = float(p.get("capacity") or 0.0)
-        records: list[dict] = []
-
+    if pending_codes:
+        batch_codes_str = ",".join(pending_codes)
+        logger.info(
+            "Consultando %d plantas pendientes en LOTE (1 petición por mes) para %s...",
+            len(pending_codes),
+            months,
+        )
         for m in months:
             try:
-                resp = fusion_client.get_station_kpi_month(code, m)
+                time.sleep(2.5)
+                resp = fusion_client.get_station_kpi_month(batch_codes_str, m)
                 rows = resp.get("data", []) or []
                 for row in rows:
+                    scode = row.get("stationCode") or row.get("plantCode")
                     collect_ms = row.get("collectTime")
-                    if not collect_ms:
+                    if not scode or not collect_ms:
                         continue
                     dt = datetime.fromtimestamp(collect_ms / 1000.0, tz=BOGOTA_TZ).strftime("%Y-%m-%d")
                     dim = row.get("dataItemMap") or {}
@@ -187,7 +208,7 @@ def run_backfill_and_estimate(n_months: int = 4) -> dict[str, Any]:
                     exp = float(dim.get("ongrid_power") or 0.0)
                     imp = float(dim.get("buyPower") or dim.get("buy_power") or 0.0)
                     auto = max(0.0, gen - exp)
-                    records.append({
+                    daily_records_by_plant.setdefault(scode, []).append({
                         "fecha": dt,
                         "gen_kwh": round(gen, 2),
                         "export_kwh": round(exp, 2),
@@ -195,18 +216,60 @@ def run_backfill_and_estimate(n_months: int = 4) -> dict[str, Any]:
                         "autoconsumo_kwh": round(auto, 2),
                     })
             except Exception as exc:
-                logger.warning("Error consultando %s mes %s: %s", name, m, exc)
+                logger.warning("Lote mes %s devolvió advertencia: %s", m, exc)
 
+    estimates: dict[str, dict] = {}
+    now_bogota = datetime.now(BOGOTA_TZ)
+    days_in_current_month = max(1, now_bogota.day)
+
+    for p in plants:
+        code = p["plantCode"]
+        name = p.get("plantName", code)
+        nom_cap = float(p.get("capacity") or 0.0)
+        prev = existing_estimates.get(code, {})
+
+        records = daily_records_by_plant.get(code, [])
         records.sort(key=lambda r: r["fecha"])
         daily_series = [r["gen_kwh"] for r in records]
-        est = kpi_domain.estimate_capacity_from_history(daily_series)
+
+        if len(daily_series) >= 5:
+            est = kpi_domain.estimate_capacity_from_history(daily_series)
+        elif prev.get("kwp_estimated"):
+            est = {
+                "kwp_estimated": prev.get("kwp_estimated"),
+                "e_p90_kwh": prev.get("e_p90_kwh"),
+                "e_median_kwh": prev.get("e_median_kwh"),
+                "sample_days": prev.get("sample_days", 0),
+                "method": prev.get("method", "p90_daily_yield"),
+            }
+        else:
+            # Fallback provisional usando energía acumulada del mes / día desde getStationRealKpi
+            rdim = real_kpi_map.get(code, {})
+            month_p = float(rdim.get("month_power") or 0.0)
+            day_p = float(rdim.get("day_power") or 0.0)
+            avg_daily = (month_p / days_in_current_month) if month_p > 0 else day_p
+            if avg_daily > 1.0:
+                kwp_prov = round(avg_daily / (kpi_domain.HSP_REF * kpi_domain.PR_DESIGN), 2)
+                est = {
+                    "kwp_estimated": kwp_prov,
+                    "e_p90_kwh": round(avg_daily, 2),
+                    "e_median_kwh": round(avg_daily, 2),
+                    "sample_days": days_in_current_month if month_p > 0 else 1,
+                    "method": "provisional_month_yield",
+                }
+            else:
+                est = {
+                    "kwp_estimated": None,
+                    "sample_days": 0,
+                    "method": "insufficient_history",
+                }
+
         eff_cap = nom_cap if nom_cap > 0 else float(est.get("kwp_estimated") or 0.0)
 
         for r in records:
             r["yf_kwh_kwp"] = kpi_domain.calc_specific_yield(r["gen_kwh"], eff_cap)
             r["indice_diseno_pct"] = kpi_domain.calc_design_index(r["gen_kwh"], eff_cap)
 
-        daily_records_by_plant[code] = records
         estimates[code] = {
             "plant_code": code,
             "plant_name": name,
@@ -216,11 +279,11 @@ def run_backfill_and_estimate(n_months: int = 4) -> dict[str, Any]:
             **est,
         }
         logger.info(
-            "Planta %-24s | nominal=%6.1f kWp | estimado_P90=%s kWp (%d días)",
+            "Planta %-24s | nominal=%6.1f kWp | efectivo=%6.1f kWp | metodo=%s",
             name[:24],
             nom_cap,
-            est.get("kwp_estimated"),
-            est.get("sample_days", 0),
+            eff_cap,
+            "fusionsolar" if nom_cap > 0 else est.get("method"),
         )
 
     payload = {
@@ -236,8 +299,7 @@ def run_backfill_and_estimate(n_months: int = 4) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Backfill histórico y estimación P90 de kWp")
-    parser.add_argument("--months", type=int, default=4, help="Número de meses hacia atrás a consultar")
+    parser = argparse.ArgumentParser(description="Backfill histórico en lote y estimación de kWp")
+    parser.add_argument("--months", type=int, default=3, help="Número de meses hacia atrás a consultar")
     args = parser.parse_args()
     run_backfill_and_estimate(args.months)
-

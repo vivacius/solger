@@ -33,3 +33,4 @@
 
 ## 📸 Evidencia / Capturas / Logs (Opcional)
 <!-- Adjunta salida de consola, capturas del dashboard o resultados de sincronización -->
+

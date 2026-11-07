@@ -286,13 +286,58 @@ function NewInvoiceModal({ plants, onClose, onCreated }: {
     plant_code: plants[0]?.plantCode ?? '',
     plant_name: plants[0]?.plantName ?? '',
     period: new Date().toISOString().slice(0, 7),  // YYYY-MM
+    period_start: '',
+    period_end: '',
+    days_billed: null as number | null,
+    account_code: '',
+    invoice_number: '',
+    meter_number: '',
     kwh_billed: '',
     price_cop_kwh: '',
+    componentes_cu: null as Record<string, number> | null,
     notes: '',
   });
   const [saving, setSaving] = useState(false);
+  const [parsingPdf, setParsingPdf] = useState(false);
 
   const total_cop = parseFloat(form.kwh_billed || '0') * parseFloat(form.price_cop_kwh || '0');
+
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setParsingPdf(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch('/api/invoices/parse-pdf', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d?.success && d.parsed) {
+        const p = d.parsed;
+        const cycleNote = p.period_start && p.period_end
+          ? `Ciclo Celsia: ${p.period_start} a ${p.period_end} (${p.days_billed ?? ''} días) · Cuenta ${p.account_code ?? ''} · Medidor ${p.meter_number ?? ''}`
+          : '';
+        setForm(f => ({
+          ...f,
+          company: p.company || f.company,
+          period: p.period || f.period,
+          period_start: p.period_start || '',
+          period_end: p.period_end || '',
+          days_billed: p.days_billed ?? null,
+          account_code: p.account_code || '',
+          invoice_number: p.invoice_number || '',
+          meter_number: p.meter_number || '',
+          kwh_billed: p.kwh_billed != null ? String(p.kwh_billed) : f.kwh_billed,
+          price_cop_kwh: p.price_cop_kwh != null ? String(p.price_cop_kwh) : f.price_cop_kwh,
+          componentes_cu: p.componentes_cu || null,
+          notes: cycleNote || f.notes,
+        }));
+      }
+    } catch (err) {
+      console.error('Error leyendo PDF Celsia:', err);
+    } finally {
+      setParsingPdf(false);
+    }
+  };
 
   const handlePlantChange = (code: string) => {
     const p = plants.find(p => p.plantCode === code);
@@ -351,6 +396,43 @@ function NewInvoiceModal({ plants, onClose, onCreated }: {
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Auto-lectura PDF Celsia */}
+          <div style={{
+            padding: '10px 12px', borderRadius: 8,
+            background: `${BRAND.teal}10`, border: `1px dashed ${BRAND.teal}60`,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+          }}>
+            <div>
+              <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+                Auto-lectura de PDF Celsia
+              </p>
+              <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 1 }}>
+                Extrae ciclo exacto, kWh, tarifa CU y componentes (G, C, T, D, PR, R)
+              </p>
+            </div>
+            <label style={{
+              padding: '6px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+              background: BRAND.teal, color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap',
+            }}>
+              {parsingPdf ? 'Leyendo…' : 'Cargar PDF'}
+              <input type="file" accept="application/pdf" onChange={handlePdfUpload} style={{ display: 'none' }} />
+            </label>
+          </div>
+
+          {form.componentes_cu && Object.keys(form.componentes_cu).length > 0 && (
+            <div style={{
+              padding: '8px 12px', borderRadius: 8, fontSize: 11,
+              background: 'var(--bg-subtle)', border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+            }}>
+              <strong>Desglose CU extraído:</strong> G=${form.componentes_cu.G_generacion} · C=${form.componentes_cu.C_comercializacion} · T=${form.componentes_cu.T_transmision} · D=${form.componentes_cu.D_distribucion} · PR=${form.componentes_cu.PR_perdidas} · R=${form.componentes_cu.R_restricciones}
+              <br />
+              <span style={{ color: BRAND.green, fontWeight: 600 }}>
+                Crédito neto Excedente Tipo 1 AGPE (CU − C): ${form.componentes_cu.tarifa_excedente_t1_agpe}/kWh
+              </span>
+            </div>
+          )}
+
           {/* Empresa */}
           <div>
             <label style={labelStyle}>Empresa compradora</label>

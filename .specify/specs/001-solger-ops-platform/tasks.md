@@ -8,3 +8,4 @@
 - [x] **T06**: Implementar motor estadístico de anomalías (`backend/anomalies.py`) y script de backfill (`backend/sync_and_estimate.py`).
 - [x] **T07**: Configurar Spec Kit (`.specify/`), plantilla de PR (`.github/pull_request_template.md`) y configuración de Vercel (`vercel.json`, `api/index.py`).
 - [ ] **T08**: Ejecutar SQL en Supabase, exponer el schema `solger` en la API de Supabase y correr `sync_and_estimate.py`.
+
