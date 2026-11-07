@@ -1,0 +1,39 @@
+name: Sincronización de Base de Datos cada 2 Horas (24/7)
+
+on:
+  schedule:
+    # Ejecuta cada 2 horas todos los días (00:00, 02:00, 04:00 ... 22:00 UTC)
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+jobs:
+  etl-solar-sync:
+    name: Sincronizar Telemetría, Satélite y Alertas Críticas
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout del repositorio SOLGER
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements.txt
+
+      - name: Ejecutar ETL y Verificación de Ventana Solar
+        env:
+          FUSIONSOLAR_BASE_URL: ${{ secrets.FUSIONSOLAR_BASE_URL || 'https://la5.fusionsolar.huawei.com' }}
+          FUSIONSOLAR_USERNAME: ${{ secrets.FUSIONSOLAR_USERNAME || 'SOLGER' }}
+          FUSIONSOLAR_PASSWORD: ${{ secrets.FUSIONSOLAR_PASSWORD || 'Solar2022' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || '9182298648:AAEWdyYWNsxS3bdvzFqo__ZhFKxR69V_nbk' }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || '5475150163' }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://cugajlobgbwnvhvtqnxw.supabase.co' }}
+          VITE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python backend/etl_sync.py

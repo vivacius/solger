@@ -3,6 +3,12 @@
   "buildCommand": "npm --prefix webapp install && npm --prefix webapp run build",
   "outputDirectory": "webapp/dist",
   "framework": null,
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 30,
+      "excludeFiles": "{webapp/**,**/node_modules/**,.git/**,*.pdf,*.mp4,analytics/data/processed/**,docs/**,specs/**,.specify/**}"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",

@@ -613,5 +613,85 @@ def get_cycle_kpi_from_supabase(plant_code: str, p_start: str, p_end: str) -> di
         return None
 
 
+ACCOUNT_MAP_FILE = Path(__file__).resolve().parent.parent / "data" / "processed" / "account_plant_map.json"
+
+
+def bind_account_code_to_plant(plant_code: str, account_code: str | None, meter_number: str | None = None) -> None:
+    """
+    Vincula automáticamente el código de cuenta de Celsia (`codigo_cuenta_or`) y/o medidor
+    con la planta solar tanto localmente como en `solger.planta` en Supabase.
+    """
+    if not plant_code or not account_code:
+        return
+    clean_acc = str(account_code).strip()
+    if not clean_acc:
+        return
+    try:
+        ACCOUNT_MAP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        mapping: dict[str, dict[str, str]] = {}
+        if ACCOUNT_MAP_FILE.exists():
+            mapping = json.loads(ACCOUNT_MAP_FILE.read_text(encoding="utf-8"))
+        mapping[clean_acc] = {
+            "plant_code": plant_code,
+            "meter_number": str(meter_number or ""),
+        }
+        ACCOUNT_MAP_FILE.write_text(json.dumps(mapping, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+    if is_configured():
+        try:
+            base = f"{settings.SUPABASE_URL}/rest/v1"
+            patch_body: dict[str, Any] = {"codigo_cuenta_or": clean_acc}
+            if meter_number:
+                patch_body["medidor_bidireccional"] = str(meter_number)
+            requests.patch(
+                f"{base}/planta?station_code=eq.{plant_code}",
+                headers=_headers(),
+                json=patch_body,
+                timeout=8,
+            )
+        except Exception as exc:
+            logger.debug("No se pudo vincular codigo_cuenta_or en Supabase: %s", exc)
+
+
+def find_plant_by_account_code(account_code: str | None) -> dict[str, str] | None:
+    """Busca qué planta tiene asignado un `codigo_cuenta` de Celsia."""
+    if not account_code:
+        return None
+    clean_acc = str(account_code).strip()
+    if not clean_acc:
+        return None
+
+    # 1. Buscar en mapa local rápido
+    if ACCOUNT_MAP_FILE.exists():
+        try:
+            mapping = json.loads(ACCOUNT_MAP_FILE.read_text(encoding="utf-8"))
+            if clean_acc in mapping:
+                return mapping[clean_acc]
+        except Exception:
+            pass
+
+    # 2. Buscar en Supabase (`solger.planta.codigo_cuenta_or`)
+    if is_configured():
+        try:
+            base = f"{settings.SUPABASE_URL}/rest/v1"
+            r = requests.get(
+                f"{base}/planta?codigo_cuenta_or=eq.{clean_acc}&select=station_code,nombre",
+                headers=_headers(),
+                timeout=8,
+            )
+            if r.status_code == 200 and r.json():
+                row = r.json()[0]
+                return {
+                    "plant_code": row.get("station_code", ""),
+                    "plant_name": row.get("nombre", ""),
+                }
+        except Exception:
+            pass
+    return None
+
+
+
 
 
