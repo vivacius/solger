@@ -42,8 +42,14 @@ def run_hourly_etl_and_alerts() -> dict:
         for k in kpis
     }
 
-    # Persistir snapshot diario en solger.kpi_diario
-    supabase_store.sync_daily_kpis(plants, kpis)
+    # Persistir series diarias de cada planta en solger.kpi_diario
+    for p in plants:
+        pcode = p.get("plantCode")
+        if pcode:
+            try:
+                backend_main.get_plant_kpi_month(pcode)
+            except Exception:
+                pass
 
     # Verificar si estamos en ventana solar (07:00 a 17:00 COT) para alertas críticas inmediatas
     is_solar_window = 7 <= now_cot.hour <= 17
@@ -113,3 +119,4 @@ def run_hourly_etl_and_alerts() -> dict:
 
 if __name__ == "__main__":
     run_hourly_etl_and_alerts()
+

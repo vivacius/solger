@@ -646,7 +646,7 @@ def bind_account_code_to_plant(plant_code: str, account_code: str | None, meter_
             if meter_number:
                 patch_body["medidor_bidireccional"] = str(meter_number)
             requests.patch(
-                f"{base}/planta?station_code=eq.{plant_code}",
+                f"{base}/planta?fs_plant_code=eq.{plant_code}",
                 headers=_headers(),
                 json=patch_body,
                 timeout=8,
@@ -677,14 +677,14 @@ def find_plant_by_account_code(account_code: str | None) -> dict[str, str] | Non
         try:
             base = f"{settings.SUPABASE_URL}/rest/v1"
             r = requests.get(
-                f"{base}/planta?codigo_cuenta_or=eq.{clean_acc}&select=station_code,nombre",
+                f"{base}/planta?codigo_cuenta_or=eq.{clean_acc}&select=fs_plant_code,nombre",
                 headers=_headers(),
                 timeout=8,
             )
             if r.status_code == 200 and r.json():
                 row = r.json()[0]
                 return {
-                    "plant_code": row.get("station_code", ""),
+                    "plant_code": row.get("fs_plant_code", ""),
                     "plant_name": row.get("nombre", ""),
                 }
         except Exception:
