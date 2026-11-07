@@ -1,15 +1,24 @@
 -- =============================================================================
 -- SOLGER — Esquema principal en Supabase (schema: solger)
--- Incluye: activos, capacidad nominal vs. estimada por histórico, series de
--- tiempo, anomalías estadísticas, órdenes de trabajo, recibos/conciliación y RLS.
+-- 100% dinámico: ninguna planta está quemada en SQL. Todas las plantas nuevas
+-- o existentes en la cuenta de FusionSolar se descubren y sincronizan
+-- automáticamente vía ON CONFLICT (fs_plant_code) DO UPDATE.
 -- =============================================================================
 
 CREATE SCHEMA IF NOT EXISTS solger;
 
--- Exponer el schema a los roles de Supabase API
+-- Permisos para el API de Supabase (PostgREST)
+-- IMPORTANTE: En Supabase Dashboard -> Settings -> API -> Exposed schemas,
+-- asegúrate de incluir "solger".
 GRANT USAGE ON SCHEMA solger TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA solger TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA solger TO authenticated;
+GRANT SELECT ON ALL TABLES IN SCHEMA solger TO anon;
+
 ALTER DEFAULT PRIVILEGES IN SCHEMA solger
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated, service_role;
+    GRANT ALL ON TABLES TO service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA solger
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA solger
     GRANT USAGE, SELECT ON SEQUENCES TO authenticated, service_role;
 
@@ -39,44 +48,47 @@ CREATE TABLE IF NOT EXISTS solger.cliente (
     UNIQUE (org_id, nombre)
 );
 
--- ─── 2. Plantas y Equipos ─────────────────────────────────────────────────────
+-- ─── 2. Plantas y Equipos (Auto-descubiertas desde FusionSolar) ───────────────
 
 CREATE TABLE IF NOT EXISTS solger.planta (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id                  UUID NOT NULL REFERENCES solger.organizacion(id) ON DELETE CASCADE,
-    cliente_id              UUID REFERENCES solger.cliente(id) ON DELETE SET NULL,
-    fs_plant_code           TEXT NOT NULL UNIQUE,
-    fs_plant_id             TEXT,
-    nombre                  TEXT NOT NULL,
-    -- Capacidad nominal configurada vs. capacidad estimada por histórico (P90)
-    kwp_dc_nominal          NUMERIC(10, 2) NOT NULL DEFAULT 0,
-    kwp_dc_estimado         NUMERIC(10, 2),
-    kw_ac_nominal           NUMERIC(10, 2),
-    metodo_estimacion_kwp   TEXT,          -- 'fusionsolar' | 'p90_historico' | 'placa_manual'
-    kwp_actualizado_en      TIMESTAMPTZ,
-    pr_base_historico       NUMERIC(5, 4) NOT NULL DEFAULT 0.8000,
-    latitud                 DOUBLE PRECISION,
-    longitud                DOUBLE PRECISION,
-    direccion               TEXT,
-    municipio               TEXT,
-    departamento            TEXT DEFAULT 'Valle del Cauca',
-    fecha_conexion          DATE,
-    comercializador         TEXT DEFAULT 'Celsia',
-    nivel_tension           INT DEFAULT 1,
+    id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id                    UUID NOT NULL REFERENCES solger.organizacion(id) ON DELETE CASCADE,
+    cliente_id                UUID REFERENCES solger.cliente(id) ON DELETE SET NULL,
+    fs_plant_code             TEXT NOT NULL UNIQUE,
+    fs_plant_id               TEXT,
+    nombre                    TEXT NOT NULL,
+    -- Capacidad nominal configurada en FusionSolar vs. estimada por histórico P90
+    kwp_dc_nominal            NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    kwp_dc_estimado           NUMERIC(10, 2),
+    kw_ac_nominal             NUMERIC(10, 2),
+    metodo_estimacion_kwp     TEXT DEFAULT 'pendiente_historico', -- 'fusionsolar' | 'p90_daily_yield' | 'placa_manual'
+    kwp_actualizado_en        TIMESTAMPTZ,
+    pr_base_historico         NUMERIC(5, 4) NOT NULL DEFAULT 0.8000,
+    latitud                   DOUBLE PRECISION,
+    longitud                  DOUBLE PRECISION,
+    direccion                 TEXT,
+    municipio                 TEXT,
+    departamento              TEXT DEFAULT 'Valle del Cauca',
+    fecha_conexion            DATE,
+    comercializador           TEXT DEFAULT 'Celsia',
+    nivel_tension             INT DEFAULT 1,
     tiene_medidor_inteligente BOOLEAN NOT NULL DEFAULT true,
     tiene_sensor_irradiancia  BOOLEAN NOT NULL DEFAULT false,
-    activa                  BOOLEAN NOT NULL DEFAULT true,
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+    activa                    BOOLEAN NOT NULL DEFAULT true,
+    ultima_sincronizacion_fs  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Vista o columna calculada de capacidad efectiva (nominal si > 0, sino estimada)
+-- Vista de capacidad efectiva: usa kwp_dc_nominal si > 0; de lo contrario, kwp_dc_estimado
 CREATE OR REPLACE VIEW solger.v_planta_efectiva AS
 SELECT
     p.*,
     COALESCE(NULLIF(p.kwp_dc_nominal, 0), p.kwp_dc_estimado, 0) AS kwp_efectivo,
     (NULLIF(p.kwp_dc_nominal, 0) IS NULL AND p.kwp_dc_estimado IS NOT NULL) AS kwp_es_estimado
 FROM solger.planta p;
+
+GRANT SELECT ON solger.v_planta_efectiva TO anon, authenticated, service_role;
 
 CREATE TABLE IF NOT EXISTS solger.equipo (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -216,25 +228,25 @@ CREATE TABLE IF NOT EXISTS solger.orden_trabajo (
 -- ─── 6. Recibos del Comercializador y Conciliación (listo para carga y OCR) ──
 
 CREATE TABLE IF NOT EXISTS solger.recibo (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    planta_id           UUID NOT NULL REFERENCES solger.planta(id) ON DELETE CASCADE,
-    comercializador     TEXT NOT NULL DEFAULT 'Celsia',
-    periodo             TEXT NOT NULL, -- 'YYYY-MM'
-    fecha_inicio_ciclo  DATE,
-    fecha_fin_ciclo     DATE,
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    planta_id            UUID NOT NULL REFERENCES solger.planta(id) ON DELETE CASCADE,
+    comercializador      TEXT NOT NULL DEFAULT 'Celsia',
+    periodo              TEXT NOT NULL, -- 'YYYY-MM'
+    fecha_inicio_ciclo   DATE,
+    fecha_fin_ciclo      DATE,
     import_kwh_facturado NUMERIC(12, 2),
     export_kwh_facturado NUMERIC(12, 2),
-    kwh_neto_facturado  NUMERIC(12, 2) NOT NULL,
-    cu_cop_kwh          NUMERIC(10, 2) NOT NULL,
-    componentes_cu      JSONB NOT NULL DEFAULT '{}'::jsonb, -- {G, T, D, C, PR, R}
-    excedentes_t1_kwh   NUMERIC(12, 2),
-    excedentes_t2_kwh   NUMERIC(12, 2),
-    credito_energia_cop NUMERIC(14, 2),
-    total_cop           NUMERIC(14, 2) NOT NULL,
-    pdf_storage_path    TEXT,          -- Ruta en Supabase Storage cuando se suba el PDF
-    origen              TEXT NOT NULL DEFAULT 'manual' CHECK (origen IN ('manual', 'estimado_medidor', 'ocr')),
-    notas               TEXT,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    kwh_neto_facturado   NUMERIC(12, 2) NOT NULL,
+    cu_cop_kwh           NUMERIC(10, 2) NOT NULL,
+    componentes_cu       JSONB NOT NULL DEFAULT '{}'::jsonb, -- {G, T, D, C, PR, R}
+    excedentes_t1_kwh    NUMERIC(12, 2),
+    excedentes_t2_kwh    NUMERIC(12, 2),
+    credito_energia_cop  NUMERIC(14, 2),
+    total_cop            NUMERIC(14, 2) NOT NULL,
+    pdf_storage_path     TEXT,          -- Ruta en Supabase Storage cuando se suba el PDF
+    origen               TEXT NOT NULL DEFAULT 'manual' CHECK (origen IN ('manual', 'estimado_medidor', 'ocr')),
+    notas                TEXT,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (planta_id, periodo, origen)
 );
 
@@ -252,7 +264,7 @@ CREATE TABLE IF NOT EXISTS solger.conciliacion (
     verified_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ─── 7. Perfiles de Usuario y Control de Acceso (RLS) ─────────────────────────
+-- ─── 7. Perfiles de Usuario y Cursor de Sincronización ────────────────────────
 
 CREATE TABLE IF NOT EXISTS solger.usuario_perfil (
     user_id     UUID PRIMARY KEY, -- Referencia a auth.users(id)
@@ -264,49 +276,8 @@ CREATE TABLE IF NOT EXISTS solger.usuario_perfil (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Control de progreso del backfill histórico reanudable
 CREATE TABLE IF NOT EXISTS solger.sync_cursor (
     clave           TEXT PRIMARY KEY,
     ultimo_valor    TEXT NOT NULL,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- ─── 8. Semilla inicial de las 16 plantas de SOLGER ───────────────────────────
-
-WITH org AS (
-    SELECT id AS org_id FROM solger.organizacion WHERE nombre = 'SOLGER' LIMIT 1
-)
-INSERT INTO solger.planta (
-    org_id, fs_plant_code, fs_plant_id, nombre, kwp_dc_nominal,
-    metodo_estimacion_kwp, latitud, longitud, direccion, municipio, fecha_conexion
-)
-SELECT
-    org.org_id, v.fs_plant_code, v.fs_plant_id, v.nombre, v.kwp_dc_nominal,
-    CASE WHEN v.kwp_dc_nominal > 0 THEN 'fusionsolar' ELSE 'pendiente_historico' END,
-    v.latitud, v.longitud, v.direccion, v.municipio, v.fecha_conexion::date
-FROM org
-CROSS JOIN (VALUES
-    ('NE=35502362', '35502362', 'ANTOJO',                 0.00,   3.574051, -76.398471, 'ColombiaPalmira', 'Palmira', '2025-02-13'),
-    ('NE=33983774', '33983774', 'BURRERA',                0.00,   3.586866, -76.391021, 'Palmira, Valle del Cauca, Colombia', 'Palmira', '2024-08-09'),
-    ('NE=33752521', '33752521', 'HACIENDA LA ESTANCIA', 145.20,   3.536932, -76.318938, 'Calle 42 km1 Variante, Palmira, Valle del Cauca', 'Palmira', '2023-08-10'),
-    ('NE=33777835', '33777835', 'HDA LA CRUZ POZO 1',    83.52,   3.692602, -76.298614, 'El Cerrito, Valle del Cauca', 'El Cerrito', '2023-10-23'),
-    ('NE=33790681', '33790681', 'HDA LA CRUZ POZO 2',    83.52,   3.687233, -76.285932, 'El Cerrito, Valle del Cauca', 'El Cerrito', '2023-11-24'),
-    ('NE=33795881', '33795881', 'HDA LA CRUZ POZO 3',    83.52,   3.693611, -76.336389, 'El Cerrito, Valle del Cauca', 'El Cerrito', '2023-12-06'),
-    ('NE=33945451', '33945451', 'HDA MONICA',             0.00,   3.601715, -76.363988, 'Palmira, Valle del Cauca', 'Palmira', '2024-06-27'),
-    ('NE=33731244', '33731244', 'HDA PASO ANCHO',       122.00,   3.609018, -76.403360, 'Palmira, Valle del Cauca', 'Palmira', '2023-03-25'),
-    ('NE=34081254', '34081254', 'HERRAGRICOLA',           0.00,   3.520951, -76.322249, 'Palmira, Valle del Cauca', 'Palmira', '2024-09-27'),
-    ('NE=35899144', '35899144', 'LA ESPERANZA 2',         0.00,   3.543947, -76.227425, 'Palmira, Valle del Cauca', 'Palmira', '2025-04-16'),
-    ('NE=52329050', '52329050', 'La unión',               0.00,   3.767778, -76.337778, 'Carrera 13 8-14, Guacarí, Valle del Cauca', 'Guacarí', '2026-02-12'),
-    ('NE=33879854', '33879854', 'MOLINO SAN GERARDO',     0.00,   3.761923, -76.327795, 'Cl. 4 #261, Guacarí, Valle del Cauca', 'Guacarí', '2024-04-13'),
-    ('NE=35975392', '35975392', 'PICHINDE',               0.00,   3.502474, -76.202842, 'Palmira, Valle del Cauca', 'Palmira', '2025-04-29'),
-    ('NE=34035592', '34035592', 'RIO GUACHAL',            0.00,   3.570135, -76.417819, 'Palmira, Valle del Cauca', 'Palmira', '2024-09-11'),
-    ('NE=33744070', '33744070', 'SAN FELIPE - QUANTUM', 145.20,   3.543076, -76.330311, 'Palmira, Valle del Cauca', 'Palmira', '2023-06-13'),
-    ('NE=37308996', '37308996', 'SUPER GRANOS',           0.00,   3.710442, -76.291416, 'El Cerrito, Valle del Cauca', 'El Cerrito', '2025-07-03')
-) AS v(fs_plant_code, fs_plant_id, nombre, kwp_dc_nominal, latitud, longitud, direccion, municipio, fecha_conexion)
-ON CONFLICT (fs_plant_code) DO UPDATE SET
-    nombre = EXCLUDED.nombre,
-    kwp_dc_nominal = CASE WHEN EXCLUDED.kwp_dc_nominal > 0 THEN EXCLUDED.kwp_dc_nominal ELSE solger.planta.kwp_dc_nominal END,
-    latitud = EXCLUDED.latitud,
-    longitud = EXCLUDED.longitud,
-    municipio = EXCLUDED.municipio,
-    fecha_conexion = EXCLUDED.fecha_conexion;

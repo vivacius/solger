@@ -21,6 +21,7 @@ from fusionsolar import APIError, AuthenticationError, BOGOTA_TZ, fusion_client
 import kpi as kpi_domain
 import market as market_svc
 import invoice_store
+import supabase_store
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -73,10 +74,11 @@ def health_check() -> dict:
 
 @app.get("/api/plants", tags=["Plantas"])
 def get_plants() -> dict[str, Any]:
-    """Lista completa de plantas solares del portafolio."""
+    """Lista completa de plantas solares del portafolio (con auto-sync hacia solger.planta)."""
     try:
         data = fusion_client.get_plant_list()
-        plants = data.get("data", {}).get("list", [])
+        raw_plants = data.get("data", {}).get("list", [])
+        plants = supabase_store.auto_sync_plants(raw_plants)
         return {
             "success": True,
             "total": len(plants),
@@ -95,10 +97,11 @@ def get_portfolio_summary() -> dict[str, Any]:
     """
     try:
         plants_data = fusion_client.get_plant_list()
-        plants = plants_data.get("data", {}).get("list", [])
-        if not plants:
+        raw_plants = plants_data.get("data", {}).get("list", [])
+        if not raw_plants:
             raise HTTPException(status_code=404, detail="No se encontraron plantas.")
 
+        plants = supabase_store.auto_sync_plants(raw_plants)
         total_capacity = sum(float(p.get("capacity") or 0) for p in plants)
         plant_codes = [p["plantCode"] for p in plants]
 
