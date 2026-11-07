@@ -11,6 +11,7 @@ import MaintenancePage from './pages/MaintenancePage';
 import LandingPage from './pages/LandingPage';
 import MarketPage from './pages/MarketPage';
 import InvoicePage from './pages/InvoicePage';
+import { ReportsPage } from './pages/ReportsPage';
 
 function AppRoutes() {
   const { isAuthenticated } = useAuth();
@@ -31,6 +32,7 @@ function AppRoutes() {
         <Route path="mantenimiento" element={<MaintenancePage />} />
         <Route path="mercado" element={<MarketPage />} />
         <Route path="facturacion" element={<InvoicePage />} />
+        <Route path="reportes" element={<ReportsPage />} />
         <Route path="*" element={<Dashboard />} />
       </Route>
     </Routes>

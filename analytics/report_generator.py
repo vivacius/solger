@@ -162,23 +162,40 @@ def calc_maintenance_due(grid_date_str) -> list:
     return results
 
 
-# ─── Fetch de datos del proxy ─────────────────────────────────────────────────
+# ─── Fetch de datos del proxy (con fallback directo a backend en proceso) ─────
+def _get_backend_main():
+    backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../backend"))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    import main as backend_main
+    return backend_main
+
 def fetch_data_from_proxy():
-    """Consulta el portafolio completo desde el backend proxy."""
+    """Consulta el portafolio completo desde el backend proxy o directamente en proceso (GitHub Actions)."""
     try:
-        r = requests.get("http://localhost:8000/api/plants/summary", timeout=10)
+        r = requests.get("http://127.0.0.1:8000/api/plants/summary", timeout=10)
         if r.status_code == 200:
             return r.json()
     except Exception:
         pass
+    try:
+        bm = _get_backend_main()
+        return bm.get_plants_summary()
+    except Exception as exc:
+        print(f"  [WARN] Error consultando resumen en proceso: {exc}")
     return None
 
 def fetch_alerts_from_proxy():
-    """Consulta las alarmas activas desde el backend proxy."""
+    """Consulta las alarmas activas desde el backend proxy o directamente en proceso."""
     try:
-        r = requests.get("http://localhost:8000/api/alerts", timeout=10)
+        r = requests.get("http://127.0.0.1:8000/api/alerts", timeout=10)
         if r.status_code == 200:
             return r.json()
+    except Exception:
+        pass
+    try:
+        bm = _get_backend_main()
+        return bm.get_alerts()
     except Exception:
         pass
     return None
@@ -188,17 +205,23 @@ def fetch_series_from_proxy(plant_code: str):
     day_data, month_data = [], []
     enc = plant_code.replace("=", "__")
     try:
-        r = requests.get(f"http://localhost:8000/api/plants/{enc}/kpi/day", timeout=10)
+        r = requests.get(f"http://127.0.0.1:8000/api/plants/{enc}/kpi/day", timeout=8)
         if r.status_code == 200:
             day_data = r.json().get("data", [])
     except Exception:
         pass
     try:
-        r = requests.get(f"http://localhost:8000/api/plants/{enc}/kpi/month", timeout=10)
+        r = requests.get(f"http://127.0.0.1:8000/api/plants/{enc}/kpi/month", timeout=8)
         if r.status_code == 200:
             month_data = r.json().get("data", [])
     except Exception:
         pass
+    if not month_data:
+        try:
+            bm = _get_backend_main()
+            month_data = bm.get_plant_kpi_month(plant_code).get("data", [])
+        except Exception:
+            pass
     return day_data, month_data
 
 
@@ -294,7 +317,7 @@ def generate_monthly_chart(month_data: list, filename: str) -> bool:
         ts = item.get("collectTime", 0)
         dt = datetime.fromtimestamp(ts / 1000)
         d  = item.get("dataItemMap", {}) or {}
-        gen  = max(0.0, float(d.get("inverterYield") or 0))
+        gen  = max(0.0, float(d.get("inverter_power") or d.get("inverterYield") or d.get("PVYield") or 0))
         exp  = min(max(0.0, float(d.get("ongrid_power") or 0)), gen)
         self_use = min(float(d.get("selfUsePower") or d.get("selfProvide") or max(0.0, gen - exp)), gen)
         buy  = max(0.0, float(d.get("buyPower") or 0))
@@ -472,10 +495,11 @@ def build_executive_html_report(
     hsp_list    = []
     for p in plants:
         dim   = kpi_map.get(p.get("plantCode"), {})
-        cap   = float(p.get("capacity") or 0)
+        raw_cap = float(p.get("capacity") or 0)
+        cap   = float(p.get("effectiveCapacity_kWp") or raw_cap or 0)
         day_p = float(dim.get("day_power") or 0)
         health = dim.get("real_health_state", 0)
-        cap_est = cap <= 0
+        cap_est = bool(p.get("capacityEstimated")) or (raw_cap <= 0 and cap > 0)
 
         hsp_real = None
         pr       = None
@@ -549,7 +573,7 @@ def build_executive_html_report(
         elif h == 1: hl, hc_lbl, hbg = "Offline",    "#991B1B", "#FEE2E2"
         else:        hl, hc_lbl, hbg = "Sin datos",  C_MUTED,   "#F1F5F9"
 
-        cap_lbl = f"{pp['capacity']:.1f} kWp" if pp['capacity'] > 0 else f"<span style='color:{C_DIM};'>N/C *</span>"
+        cap_lbl = f"{pp['capacity']:.1f} kWp{' *' if pp.get('cap_estimated') else ''}" if pp['capacity'] > 0 else f"<span style='color:{C_DIM};'>N/C *</span>"
         hsp_v = pp['hsp_real']
         hsp_lbl = f"<span style='font-weight:700;color:{_hc(hsp_v)};'>{hsp_v:.1f} h</span>" if hsp_v else f"<span style='color:{C_DIM};'>—</span>"
 
@@ -594,7 +618,7 @@ def build_executive_html_report(
 
     cap_note = (
         f'<div style="padding:5px 14px 8px;font-size:10px;color:{C_DIM};">'
-        f'* Capacidad no configurada en FusionSolar — HSP y PR no calculables para esta planta.</div>'
+        f'* Capacidad estimada estadísticamente (P90 histórico) para cálculo de HSP real y PR.</div>'
         if any(p['cap_estimated'] for p in plants_perf) else ''
     )
 
@@ -915,7 +939,7 @@ def build_plant_html_report(
     """Reporte HTML individual por planta (para correo técnico)."""
     now_str    = datetime.now().strftime("%d/%m/%Y %H:%M")
     plant_name = plant.get("plantName", "Planta Solar")
-    capacity   = plant.get("capacity", 0.0) or 0.0
+    capacity   = float(plant.get("effectiveCapacity_kWp") or plant.get("capacity") or 0.0)
     address    = plant.get("plantAddress", "No especificada")
     grid_date  = plant.get("gridConnectionDate", "—")
     lat        = plant.get("latitude", "—"); lng = plant.get("longitude", "—")
@@ -1028,29 +1052,76 @@ body{{font-family:'Segoe UI',sans-serif;background:{C_BG};color:{C_DARK};margin:
 
 
 # ─── Telegram ─────────────────────────────────────────────────────────────────
-def send_telegram_notification(text: str):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
+def send_telegram_notification(
+    text: str,
+    chart_paths: list[str] | None = None,
+    html_report_path: str | None = None,
+    caption_title: str = "Reporte Ejecutivo SOLGER",
+) -> tuple[bool, str]:
+    load_dotenv(override=True)
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN)
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", TELEGRAM_CHAT_ID)
+    if not bot_token or not chat_id:
+        return False, "TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurado en .env"
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"},
-            timeout=10,
+        base_tg = f"https://api.telegram.org/bot{bot_token}"
+        r = requests.post(
+            f"{base_tg}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+            timeout=15,
         )
-    except Exception:
-        pass
+        if r.status_code != 200:
+            return False, f"Telegram HTTP {r.status_code}: {r.text[:140]}"
+
+        # Enviar gráficos PNG adjuntos si existen
+        for cp in (chart_paths or []):
+            if cp and os.path.exists(cp):
+                try:
+                    with open(cp, "rb") as img_f:
+                        requests.post(
+                            f"{base_tg}/sendPhoto",
+                            data={"chat_id": chat_id},
+                            files={"photo": (os.path.basename(cp), img_f, "image/png")},
+                            timeout=20,
+                        )
+                except Exception:
+                    pass
+
+        # Enviar el archivo HTML completo del reporte adjunto para abrirlo desde Telegram
+        if html_report_path and os.path.exists(html_report_path):
+            try:
+                with open(html_report_path, "rb") as doc_f:
+                    requests.post(
+                        f"{base_tg}/sendDocument",
+                        data={"chat_id": chat_id, "caption": f"📄 {caption_title} (HTML interactivo con gráficos)"},
+                        files={"document": (os.path.basename(html_report_path), doc_f, "text/html")},
+                        timeout=25,
+                    )
+            except Exception:
+                pass
+
+        return True, f"Reporte y gráficos enviados a Telegram (chat {chat_id})"
+    except Exception as e:
+        return False, str(e)
 
 
 # ─── Email: reporte individual de planta ─────────────────────────────────────
-def send_email_plant_report(html_content, plant_name, power_path, month_path):
-    if not SMTP_USER or not SMTP_PASS or not EMAIL_TO:
-        print(f"[Email - {plant_name}] SMTP no configurado en .env")
-        return
+def send_email_plant_report(html_content, plant_name, power_path, month_path, to_email: str | None = None) -> tuple[bool, str]:
+    load_dotenv(override=True)
+    smtp_user = os.getenv("SMTP_USER", SMTP_USER)
+    smtp_pass = os.getenv("SMTP_PASS", SMTP_PASS)
+    dest_email = to_email or os.getenv("EMAIL_TO", EMAIL_TO)
+    if not smtp_user or not smtp_pass or not dest_email:
+        msg_err = f"[Email - {plant_name}] SMTP_PASS no configurado en .env"
+        print(msg_err)
+        return False, msg_err
     msg = MIMEMultipart("related")
     msg["Subject"] = f"SOLGER — Reporte Operativo: {plant_name}"
-    msg["From"] = SMTP_USER; msg["To"] = EMAIL_TO
+    msg["From"] = smtp_user
+    msg["To"] = dest_email
     alt = MIMEMultipart("alternative")
-    msg.attach(alt); alt.attach(MIMEText(html_content, "html"))
+    msg.attach(alt)
+    alt.attach(MIMEText(html_content, "html"))
     logo_path = get_logo_path()
     for path, cid in [(logo_path, "logo"), (power_path, "power_chart"), (month_path, "monthly_chart")]:
         if path and os.path.exists(path):
@@ -1061,25 +1132,36 @@ def send_email_plant_report(html_content, plant_name, power_path, month_path):
                 msg.attach(img)
     try:
         srv = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
-        srv.starttls(); srv.login(SMTP_USER, SMTP_PASS)
-        srv.sendmail(SMTP_USER, EMAIL_TO, msg.as_string()); srv.quit()
-        print(f"  [OK] [Email] {plant_name} enviado correctamente.")
+        srv.starttls()
+        srv.login(smtp_user, smtp_pass)
+        srv.sendmail(smtp_user, [e.strip() for e in dest_email.split(",") if e.strip()], msg.as_string())
+        srv.quit()
+        print(f"  [OK] [Email] {plant_name} enviado correctamente a {dest_email}.")
+        return True, f"Enviado a {dest_email}"
     except Exception as e:
         print(f"  [ERROR] [Email] {plant_name}: {e}")
+        return False, str(e)
 
 
 # ─── Email: reporte ejecutivo del portafolio ─────────────────────────────────
-def send_executive_email(html_content, portfolio_chart_path=None, hsp_chart_path=None):
+def send_executive_email(html_content, portfolio_chart_path=None, hsp_chart_path=None, to_email: str | None = None) -> tuple[bool, str]:
     """Envía el reporte ejecutivo al gerente con gráficos embedded (CID)."""
-    if not SMTP_USER or not SMTP_PASS or not EMAIL_TO:
-        print("[Email Ejecutivo] SMTP no configurado en .env — revisar SMTP_PASS")
-        return
+    load_dotenv(override=True)
+    smtp_user = os.getenv("SMTP_USER", SMTP_USER)
+    smtp_pass = os.getenv("SMTP_PASS", SMTP_PASS)
+    dest_email = to_email or os.getenv("EMAIL_TO", EMAIL_TO)
+    if not smtp_user or not smtp_pass or not dest_email:
+        msg_err = "SMTP_PASS no configurado en .env (requiere Contraseña de Aplicación de Google)"
+        print(f"[Email Ejecutivo] {msg_err}")
+        return False, msg_err
     now_str = datetime.now().strftime('%d/%m/%Y')
     msg = MIMEMultipart("related")
     msg["Subject"] = f"SOLGER — Reporte Ejecutivo de Cierre | {now_str}"
-    msg["From"] = SMTP_USER; msg["To"] = EMAIL_TO
+    msg["From"] = smtp_user
+    msg["To"] = dest_email
     alt = MIMEMultipart("alternative")
-    msg.attach(alt); alt.attach(MIMEText(html_content, "html"))
+    msg.attach(alt)
+    alt.attach(MIMEText(html_content, "html"))
     logo_path = get_logo_path()
     for path, cid in [
         (logo_path,             "logo"),
@@ -1094,57 +1176,53 @@ def send_executive_email(html_content, portfolio_chart_path=None, hsp_chart_path
                 msg.attach(img)
     try:
         srv = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
-        srv.starttls(); srv.login(SMTP_USER, SMTP_PASS)
-        srv.sendmail(SMTP_USER, EMAIL_TO, msg.as_string()); srv.quit()
-        print("  [OK] [Email Ejecutivo] Reporte enviado al gerente correctamente.")
+        srv.starttls()
+        srv.login(smtp_user, smtp_pass)
+        srv.sendmail(smtp_user, [e.strip() for e in dest_email.split(",") if e.strip()], msg.as_string())
+        srv.quit()
+        print(f"  [OK] [Email Ejecutivo] Reporte enviado a {dest_email} correctamente.")
+        return True, f"Enviado a {dest_email}"
     except Exception as e:
         print(f"  [ERROR] [Email Ejecutivo] Error: {e}")
+        return False, str(e)
 
 
 # Alias para compatibilidad
 def send_email_report(html_content):
-    send_executive_email(html_content)
+    return send_executive_email(html_content)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  PUNTO DE ENTRADA
-# ══════════════════════════════════════════════════════════════════════════════
-if __name__ == "__main__":
-    print("=" * 62)
-    print("  SOLGER — Generador de Reporte Ejecutivo de Cierre")
-    print("=" * 62)
-
-    # Forzar UTF-8 en stdout para compatibilidad con Windows
-    if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8')
-
-    # ── 1. Obtener datos ──────────────────────────────────────────────────────
-    print("\n[1/4] Consultando portafolio (backend proxy)...")
-    data = fetch_data_from_proxy()
-    if not data:
-        print("  [WARN] Backend no disponible. Ejecuta: uvicorn main:app --port 8000")
-    else:
-        n = len(data.get("plants", []))
-        print(f"  [OK] {n} plantas encontradas en el portafolio.")
-
-    print("[2/4] Consultando alarmas activas...")
-    alarms_data = fetch_alerts_from_proxy()
-    if alarms_data:
-        total_a = alarms_data.get("total", 0)
-        a_rev   = sum(1 for a in alarms_data.get("alarms", []) if classify_alarm(a.get("alarmName",""), a.get("alarmCause","")) == "REVISAR")
-        print(f"  [OK] {total_a} alarmas ({a_rev} operativas a revisar).")
-    else:
-        print("  [WARN] Sin respuesta de alarmas.")
-
-    os.makedirs("data/processed", exist_ok=True)
-    plants_dir = "data/processed/plants"
+def run_report_pipeline(
+    data: dict | None = None,
+    alarms_data: dict | None = None,
+    series_fetcher=None,
+    send_email: bool = False,
+    send_telegram: bool = False,
+    target_email: str | None = None,
+    only_plant_code: str | None = None,
+) -> dict:
+    """
+    Ejecuta el pipeline completo de generación de reportes (Ejecutivo + Plantas)
+    y opcionalmente los envía por correo y/o Telegram.
+    Puede ser invocado desde FastAPI (`backend/main.py`) o por CLI.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    processed_dir = os.path.join(base_dir, "data", "processed")
+    plants_dir = os.path.join(processed_dir, "plants")
+    os.makedirs(processed_dir, exist_ok=True)
     os.makedirs(plants_dir, exist_ok=True)
 
-    # ── 2. Preparar datos para gráficos ──────────────────────────────────────
-    portfolio_chart_path = "data/processed/portfolio_chart.png"
-    hsp_chart_path       = "data/processed/hsp_chart.png"
-    logo_path            = get_logo_path()
-    kpi_map              = {}
+    if data is None:
+        data = fetch_data_from_proxy()
+    if alarms_data is None:
+        alarms_data = fetch_alerts_from_proxy()
+    if series_fetcher is None:
+        series_fetcher = fetch_series_from_proxy
+
+    portfolio_chart_path = os.path.join(processed_dir, "portfolio_chart.png")
+    hsp_chart_path = os.path.join(processed_dir, "hsp_chart.png")
+    logo_path = get_logo_path()
+    kpi_map = {}
 
     if data:
         kpi_map = {
@@ -1153,35 +1231,31 @@ if __name__ == "__main__":
         }
         plants_chart_data = []
         for p in data.get("plants", []):
-            dim    = kpi_map.get(p.get("plantCode"), {})
-            cap    = float(p.get("capacity") or 0)
-            day_p  = float(dim.get("day_power") or 0)
+            dim = kpi_map.get(p.get("plantCode"), {})
+            cap = float(p.get("effectiveCapacity_kWp") or p.get("capacity") or 0)
+            day_p = float(dim.get("day_power") or 0)
             health = dim.get("real_health_state", 0)
-            exp    = cap * HSP_REF * EFF if cap > 0 else 0
-            pr     = (day_p / exp * 100) if (exp > 0) else None
-            hsp_r  = (day_p / (cap * EFF)) if (cap > 0 and day_p > 0) else None
+            exp = cap * HSP_REF * EFF if cap > 0 else 0
+            pr = (day_p / exp * 100) if (exp > 0) else None
+            hsp_r = (day_p / (cap * EFF)) if (cap > 0 and day_p > 0) else None
             plants_chart_data.append({
                 "name": p.get("plantName", ""),
-                "day_power": day_p, "capacity": cap, "health": health,
-                "pr": pr, "hsp_real": hsp_r, "expected": exp,
+                "day_power": day_p,
+                "capacity": cap,
+                "health": health,
+                "pr": pr,
+                "hsp_real": hsp_r,
+                "expected": exp,
             })
 
-        print("[3/4] Generando graficos del portafolio...")
-        sorted_data = sorted(plants_chart_data, key=lambda x: -x['day_power'])
-        ok1 = generate_portfolio_chart(sorted_data, portfolio_chart_path)
-        ok2 = generate_hsp_chart(plants_chart_data, hsp_chart_path)
-        print(f"  [OK] Grafico portafolio: {'generado' if ok1 else 'sin datos'}")
-        print(f"  [OK] Grafico HSP:        {'generado' if ok2 else 'sin datos (sin cap. configurada)'}")
-    else:
-        print("[3/4] Sin datos — omitiendo gráficos.")
+        sorted_data = sorted(plants_chart_data, key=lambda x: -x["day_power"])
+        generate_portfolio_chart(sorted_data, portfolio_chart_path)
+        generate_hsp_chart(plants_chart_data, hsp_chart_path)
 
-    # ── 3. Reporte ejecutivo ──────────────────────────────────────────────────
-    print("[4/4] Construyendo reporte ejecutivo HTML...")
     logo_b64 = get_base64_image(logo_path)
     port_b64 = get_base64_image(portfolio_chart_path)
-    hsp_b64  = get_base64_image(hsp_chart_path)
+    hsp_b64 = get_base64_image(hsp_chart_path)
 
-    # Versión para guardar en disco (con base64 para visualización directa en navegador)
     html_exec_file = build_executive_html_report(
         data,
         alarms_data,
@@ -1189,13 +1263,14 @@ if __name__ == "__main__":
         portfolio_chart_src=port_b64 or "cid:portfolio_chart",
         hsp_chart_src=hsp_b64 or "cid:hsp_chart",
     )
-    ts        = datetime.now().strftime('%Y%m%d_%H%M%S')
-    exec_path = f"data/processed/reporte_ejecutivo_{ts}.html"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    exec_path = os.path.join(processed_dir, f"reporte_ejecutivo_{ts}.html")
+    latest_exec_path = os.path.join(processed_dir, "reporte_ejecutivo_latest.html")
     with open(exec_path, "w", encoding="utf-8") as f:
         f.write(html_exec_file)
-    print(f"  [OK] Guardado en: {exec_path}")
+    with open(latest_exec_path, "w", encoding="utf-8") as f:
+        f.write(html_exec_file)
 
-    # Versión para email con CID
     html_exec_email = build_executive_html_report(
         data,
         alarms_data,
@@ -1204,24 +1279,24 @@ if __name__ == "__main__":
         hsp_chart_src="cid:hsp_chart",
     )
 
-    # ── 4. Reportes individuales por planta ───────────────────────────────────
+    generated_plants = []
+    plant_email_results = []
     if data and data.get("plants"):
-        print(f"\nGenerando reportes individuales por planta ({len(data['plants'])})...")
         for p in data["plants"]:
             pcode = p.get("plantCode")
-            dim   = kpi_map.get(pcode, {})
-            safe  = get_safe_filename(p.get("plantName", pcode or "planta"))
-            print(f"  -> {p.get('plantName', pcode)}")
-            day_s, month_s = fetch_series_from_proxy(pcode)
-            pwr_p = f"{plants_dir}/{safe}_power.png"
-            mon_p = f"{plants_dir}/{safe}_monthly.png"
+            if only_plant_code and pcode != only_plant_code:
+                continue
+            dim = kpi_map.get(pcode, {})
+            safe = get_safe_filename(p.get("plantName", pcode or "planta"))
+            day_s, month_s = series_fetcher(pcode)
+            pwr_p = os.path.join(plants_dir, f"{safe}_power.png")
+            mon_p = os.path.join(plants_dir, f"{safe}_monthly.png")
             generate_power_chart(day_s, pwr_p, month_data=month_s)
             generate_monthly_chart(month_s, mon_p)
 
             pwr_b64 = get_base64_image(pwr_p)
             mon_b64 = get_base64_image(mon_p)
 
-            # Archivo local con imágenes base64
             p_html_file = build_plant_html_report(
                 p,
                 dim,
@@ -1229,50 +1304,122 @@ if __name__ == "__main__":
                 power_chart_src=pwr_b64 or "cid:power_chart",
                 monthly_chart_src=mon_b64 or "cid:monthly_chart",
             )
-            with open(f"{plants_dir}/{safe}.html", "w", encoding="utf-8") as f:
+            plant_file_path = os.path.join(plants_dir, f"{safe}.html")
+            with open(plant_file_path, "w", encoding="utf-8") as f:
                 f.write(p_html_file)
+            generated_plants.append({
+                "plantCode": pcode,
+                "plantName": p.get("plantName", pcode),
+                "safeName": safe,
+                "filePath": plant_file_path,
+            })
 
-            # Para email con CID
-            p_html_email = build_plant_html_report(
-                p,
-                dim,
-                logo_src="cid:logo",
-                power_chart_src="cid:power_chart",
-                monthly_chart_src="cid:monthly_chart",
+            if send_email and only_plant_code == pcode:
+                p_html_email = build_plant_html_report(
+                    p,
+                    dim,
+                    logo_src="cid:logo",
+                    power_chart_src="cid:power_chart",
+                    monthly_chart_src="cid:monthly_chart",
+                )
+                ok_p, msg_p = send_email_plant_report(p_html_email, p.get("plantName"), pwr_p, mon_p, to_email=target_email)
+                plant_email_results.append({"plant": p.get("plantName"), "ok": ok_p, "detail": msg_p})
+
+    email_ok, email_msg = False, "No solicitado"
+    if send_email and not only_plant_code:
+        email_ok, email_msg = send_executive_email(
+            html_exec_email,
+            portfolio_chart_path,
+            hsp_chart_path,
+            to_email=target_email,
+        )
+    elif send_email and only_plant_code and plant_email_results:
+        email_ok = plant_email_results[0]["ok"]
+        email_msg = plant_email_results[0]["detail"]
+
+    tg_ok, tg_msg = False, "No solicitado"
+    if send_telegram:
+        smry = (data or {}).get("summary", {})
+        n_tot = (alarms_data or {}).get("total", 0)
+        n_rev = sum(
+            1 for a in (alarms_data or {}).get("alarms", [])
+            if classify_alarm(a.get("alarmName", ""), a.get("alarmCause", "")) == "REVISAR"
+        )
+        avg_h = sum(
+            float(kpi_map.get(p.get("plantCode"), {}).get("day_power") or 0)
+            / (float(p.get("effectiveCapacity_kWp") or p.get("capacity") or 1) * EFF)
+            for p in (data or {}).get("plants", [])
+            if float(p.get("effectiveCapacity_kWp") or p.get("capacity") or 0) > 0
+            and float(kpi_map.get(p.get("plantCode"), {}).get("day_power") or 0) > 0
+        )
+        n_hsp = sum(
+            1 for p in (data or {}).get("plants", [])
+            if float(p.get("effectiveCapacity_kWp") or p.get("capacity") or 0) > 0
+            and float(kpi_map.get(p.get("plantCode"), {}).get("day_power") or 0) > 0
+        )
+        hsp_t = f"{avg_h / n_hsp:.1f} h/día" if n_hsp > 0 else "N/D"
+        if only_plant_code and generated_plants:
+            gp = generated_plants[0]
+            p_dim = kpi_map.get(only_plant_code, {})
+            day_p = float(p_dim.get("day_power") or 0)
+            mon_p = float(p_dim.get("month_power") or 0)
+            telegram_text = (
+                f"<b>☀️ SOLGER — Reporte Individual de Planta</b>\n\n"
+                f"🏭 <b>Planta:</b> {gp['plantName']}\n"
+                f"⚡ <b>Generación Hoy:</b> {day_p:.1f} kWh\n"
+                f"📅 <b>Generación Mes:</b> {mon_p:.1f} kWh\n\n"
+                f"<i>Adjunto curvas horarias/mensuales y reporte HTML completo.</i>"
             )
-            send_email_plant_report(p_html_email, p.get("plantName"), pwr_p, mon_p)
-        print(f"  [OK] Reportes individuales en: {plants_dir}/")
+            safe_n = gp["safeName"]
+            tg_ok, tg_msg = send_telegram_notification(
+                telegram_text,
+                chart_paths=[
+                    os.path.join(plants_dir, f"{safe_n}_power.png"),
+                    os.path.join(plants_dir, f"{safe_n}_monthly.png"),
+                ],
+                html_report_path=gp["filePath"],
+                caption_title=f"Reporte Operativo — {gp['plantName']}",
+            )
+        else:
+            telegram_text = (
+                f"<b>☀️ SOLGER — Cierre Operativo Diario</b>\n\n"
+                f"⚡ <b>Generación Hoy:</b> {smry.get('totalEnergyToday_kWh', 0):.1f} kWh\n"
+                f"🔆 <b>HSP Real Prom.:</b> {hsp_t}\n"
+                f"🏭 <b>Plantas Activas:</b> {smry.get('activePlants', 0)}/{smry.get('totalPlants', 0)}\n"
+                f"🌱 <b>CO₂ Evitado:</b> {smry.get('co2Avoided_ton', 0):.2f} t acumuladas\n"
+                f"🔴 <b>Alarmas:</b> {n_rev} operativas a revisar / {n_tot} total\n\n"
+                f"<i>Adjunto comparativo del portafolio, HSP real y Reporte Ejecutivo HTML completo.</i>"
+            )
+            tg_ok, tg_msg = send_telegram_notification(
+                telegram_text,
+                chart_paths=[portfolio_chart_path, hsp_chart_path],
+                html_report_path=exec_path,
+                caption_title="Reporte Ejecutivo de Cierre — SOLGER",
+            )
 
-    # ── 5. Enviar reporte ejecutivo al gerente ────────────────────────────────
-    print("\nEnviando reporte ejecutivo al gerente...")
-    send_executive_email(html_exec_email, portfolio_chart_path, hsp_chart_path)
+    return {
+        "success": True,
+        "generatedAt": datetime.now().isoformat(),
+        "executivePath": exec_path,
+        "latestExecutivePath": latest_exec_path,
+        "plantsGenerated": len(generated_plants),
+        "plants": generated_plants,
+        "email": {"sent": email_ok, "detail": email_msg},
+        "telegram": {"sent": tg_ok, "detail": tg_msg},
+    }
 
-    # ── 6. Telegram ───────────────────────────────────────────────────────────
-    smry  = (data or {}).get("summary", {})
-    n_tot = (alarms_data or {}).get("total", 0)
-    n_rev = sum(1 for a in (alarms_data or {}).get("alarms", [])
-                if classify_alarm(a.get("alarmName",""), a.get("alarmCause","")) == "REVISAR")
-    avg_h  = sum(
-        float(kpi_map.get(p.get("plantCode"), {}).get("day_power") or 0)
-        / (float(p.get("capacity") or 1) * EFF)
-        for p in (data or {}).get("plants", [])
-        if float(p.get("capacity") or 0) > 0 and float(kpi_map.get(p.get("plantCode"), {}).get("day_power") or 0) > 0
-    )
-    n_hsp = sum(1 for p in (data or {}).get("plants", [])
-                if float(p.get("capacity") or 0) > 0 and float(kpi_map.get(p.get("plantCode"), {}).get("day_power") or 0) > 0)
-    hsp_t = f"{avg_h / n_hsp:.1f} h/día" if n_hsp > 0 else "N/D"
 
-    telegram_text = (
-        f"<b>☀️ SOLGER — Cierre Operativo Diario</b>\n\n"
-        f"⚡ <b>Generación Hoy:</b> {smry.get('totalEnergyToday_kWh', 0):.1f} kWh\n"
-        f"🔆 <b>HSP Real Prom.:</b> {hsp_t}\n"
-        f"🏭 <b>Plantas Activas:</b> {smry.get('activePlants', 0)}/{smry.get('totalPlants', 0)}\n"
-        f"🌱 <b>CO₂ Evitado:</b> {smry.get('co2Avoided_ton', 0):.2f} t acumuladas\n"
-        f"🔴 <b>Alarmas:</b> {n_rev} operativas a revisar / {n_tot} total\n\n"
-        f"<i>Reporte ejecutivo enviado al gerente por correo.</i>"
-    )
-    send_telegram_notification(telegram_text)
-
-    print("\n" + "=" * 62)
-    print("  [OK] Proceso completado. Revisa tu correo.")
+# ══════════════════════════════════════════════════════════════════════════════
+#  PUNTO DE ENTRADA
+# ══════════════════════════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    print("=" * 62)
+    print("  SOLGER — Generador de Reporte Ejecutivo de Cierre (Telegram)")
+    print("=" * 62)
+    res = run_report_pipeline(send_email=False, send_telegram=True)
+    print(f"  [OK] Ejecutivo: {res['executivePath']}")
+    print(f"  [OK] Plantas generadas: {res['plantsGenerated']}")
+    print(f"  [Telegram]: {res['telegram']['detail']}")
     print("=" * 62)

@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { to: '/mantenimiento', label: 'Mantenimiento' },
   { to: '/mercado',       label: 'Mercado'   },
   { to: '/facturacion',   label: 'Facturación' },
+  { to: '/reportes',      label: 'Reportes'  },
 ];
 
 function fmtHeaderDate(): string {
