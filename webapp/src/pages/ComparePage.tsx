@@ -51,18 +51,11 @@ export default function ComparePage() {
 
       const genToday = dim.day_power ?? 0;
       const genMonth = dim.month_power ?? 0;
-      const rawCap = p.capacity ?? 0;
+      const capacity = p.capacity ?? 0;
+      const capEstimated = Boolean(p.capacityEstimated) || (p.capacityNominal ?? capacity) <= 0;
 
-      // Si la planta no tiene capacidad configurada, la estimamos igual que en
-      // MaintenancePage: capacity ≈ genHoy / (HSP × EFF)
-      const capEstimated = rawCap <= 0;
-      const capacity = capEstimated
-        ? (genToday > 0 ? +(genToday / (HSP * EFF)).toFixed(1) : 0)
-        : rawCap;
-
-      // Generación esperada de diseño: capacidad × 4.5 HSP × 80% eficiencia de sistema
-      // Si la capacidad fue estimada, la expected coincide con la real (desviación = 0 vs mes)
-      const expectedToday = !capEstimated && capacity > 0 ? capacity * HSP * EFF : genToday;
+      // Generación esperada de diseño usando la capacidad efectiva (nominal o P90 histórica desde solger.planta)
+      const expectedToday = capacity > 0 ? capacity * HSP * EFF : genToday;
       const avgDailyMonth = genMonth > 0 ? genMonth / dayOfMonth : 0;
 
       // Deviations

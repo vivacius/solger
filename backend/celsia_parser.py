@@ -160,3 +160,4 @@ def parse_celsia_pdf(pdf_bytes: bytes) -> dict[str, Any]:
         "componentes_cu": componentes_cu,
         "has_agpe_template": "Autogenerador de energía eléctrica" in text or "Consumo importado:" in text,
     }
+

@@ -1,6 +1,7 @@
 // Cliente HTTP para el backend SOLGER
 import type {
   AlertsResponse,
+  AnomaliesResponse,
   DevicesResponse,
   PlantKpiResponse,
   PlantsResponse,
@@ -50,6 +51,31 @@ export const api = {
 
   /** Alarmas activas de todas las plantas */
   getAlerts: () => apiFetch<AlertsResponse>('/alerts'),
+
+  /** Diagnóstico estadístico de anomalías (4 capas + solger.kpi_diario) */
+  getAnomalies: () => apiFetch<AnomaliesResponse>('/anomalies'),
+
+  /** Órdenes de trabajo / mantenimientos desde solger.orden_trabajo */
+  getMaintenanceOrders: (plantCode?: string) =>
+    apiFetch<{ success: boolean; total: number; orders: any[] }>(
+      `/maintenance/orders${plantCode ? `?plant_code=${encodeURIComponent(plantCode)}` : ''}`
+    ),
+
+  /** Registrar orden de trabajo / mantenimiento en solger.orden_trabajo */
+  createMaintenanceOrder: (payload: {
+    plant_code: string;
+    tipo: string;
+    prioridad?: string;
+    estado?: string;
+    titulo?: string;
+    descripcion?: string;
+    fecha_ejecucion?: string;
+  }) =>
+    fetch(`${BASE}/maintenance/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then((r) => r.json()),
 
   /** Limpiar cache del proxy */
   clearCache: () =>

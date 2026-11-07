@@ -138,6 +138,12 @@ export default function MaintenancePage() {
   const { data: alertsData, loading: alertsLoading } = useFetch(
     api.getAlerts, [], { refreshInterval: 5 * 60 * 1000 }
   );
+  const { data: anomaliesData } = useFetch(
+    api.getAnomalies, [], { refreshInterval: 5 * 60 * 1000 }
+  );
+  const { data: ordersData } = useFetch(
+    () => api.getMaintenanceOrders(), [], { refreshInterval: 5 * 60 * 1000 }
+  );
 
   // Clave para forzar re-render tras guardar en localStorage
   const [refreshKey, setRefreshKey] = useState(0);
@@ -165,37 +171,43 @@ export default function MaintenancePage() {
       const dim = kpi?.dataItemMap ?? {};
 
       const dayPower     = dim.day_power ?? 0;
-      const rawCap       = plant.capacity ?? 0;
-      const capEstimated = rawCap <= 0;
-      // Si no hay capacidad, estimamos desde la generación de hoy + HSP
-      const capacity = capEstimated
-        ? (dayPower > 0 ? +(dayPower / (HSP * EFF)).toFixed(1) : 0)
-        : rawCap;
+      const capacity     = plant.capacity ?? 0;
+      const capEstimated = Boolean(plant.capacityEstimated) || (plant.capacityNominal ?? capacity) <= 0;
 
-      // Performance Ratio solo si la capacidad es conocida (configurada)
+      // Índice de desempeño vs. diseño usando capacidad efectiva (nominal o P90 histórica desde solger.planta)
       const expectedGen = capacity * HSP * EFF;
-      const pr = (!capEstimated && expectedGen > 0)
+      const pr = expectedGen > 0
         ? Math.min(150, (dayPower / expectedGen) * 100)
         : null;
 
       const kwhPerKwp = capacity > 0 ? dayPower / capacity : null;
+      const anomEval  = anomaliesData?.evaluations?.find(e => e.plant_code === plant.plantCode);
 
       const health   = dim.real_health_state ?? 0;
       const hasAlarm = alertsData?.alarms.some(
         a => classifyAlarm(a) === 'REVISAR' && (a.plantCode === plant.plantCode || a.stationCode === plant.plantCode || a.stationCode === plant.plantName)
       ) ?? false;
 
-      const records   = getMaintLog(plant.plantCode);
+      const dbOrders = (ordersData?.orders ?? [])
+        .filter((o: any) => o.plant_code === plant.plantCode)
+        .map((o: any) => ({
+          id: String(o.id),
+          date: String(o.fecha_ejecucion || o.created_at || '').slice(0, 10),
+          type: (o.tipo || 'otro') as MaintType,
+          notes: o.descripcion || o.titulo || '',
+        }));
+      const localRecs = getMaintLog(plant.plantCode);
+      const records   = dbOrders.length > 0 ? dbOrders : localRecs;
       const nextTasks = calcNextTasks(plant.gridConnectionDate, records);
       const urgentTask   = nextTasks.find(t => t.priority === 'alta');
       const upcomingTask = nextTasks.find(t => t.priority === 'media');
       const nextTask     = urgentTask ?? upcomingTask ?? nextTasks[0];
 
-      // Prioridad global de la planta (Huawei: 1=Offline, 2=Alarma, 3=Operativa)
+      // Prioridad global de la planta (Huawei: 1=Offline, 2=Alarma, 3=Operativa + motor estadístico)
       let overallPriority: 'urgente' | 'atencion' | 'ok';
-      if (health === 1 || hasAlarm || (pr !== null && pr < PR_CRIT) || !!urgentTask) {
+      if (health === 1 || hasAlarm || anomEval?.anomalia?.severidad === 'critica' || (pr !== null && pr < PR_CRIT) || !!urgentTask) {
         overallPriority = 'urgente';
-      } else if (health === 2 || (pr !== null && pr < PR_WARN) || !!upcomingTask) {
+      } else if (health === 2 || anomEval?.anomalia?.severidad === 'atencion' || (pr !== null && pr < PR_WARN) || !!upcomingTask) {
         overallPriority = 'atencion';
       } else {
         overallPriority = 'ok';
@@ -203,7 +215,7 @@ export default function MaintenancePage() {
 
       return {
         plant, dim, dayPower, capacity, capEstimated,
-        pr, kwhPerKwp, health, hasAlarm,
+        pr, kwhPerKwp, health, hasAlarm, anomEval,
         records, nextTasks, nextTask, overallPriority,
       };
     }).sort((a, b) => {
@@ -211,7 +223,7 @@ export default function MaintenancePage() {
       return o[a.overallPriority] - o[b.overallPriority];
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary, alertsData, refreshKey]);
+  }, [summary, alertsData, anomaliesData, ordersData, refreshKey]);
 
   /* ── Semáforo portafolio ─── */
   const counts = useMemo(() => ({
@@ -291,7 +303,7 @@ export default function MaintenancePage() {
                 </thead>
                 <tbody>
                   {plantHealth.map(ph => {
-                    const { plant, pr, kwhPerKwp, health, capEstimated, capacity, records, nextTask, overallPriority } = ph;
+                    const { plant, pr, kwhPerKwp, health, capEstimated, capacity, anomEval, records, nextTask, overallPriority } = ph;
 
                     const healthMap = {
                       3: { label: 'Operativa', color: BRAND.greenD, bg: BRAND.greenL },
@@ -380,7 +392,7 @@ export default function MaintenancePage() {
                           )}
                         </td>
 
-                        {/* kWh/kWp */}
+                        {/* kWh/kWp + Diagnóstico estadístico de pares */}
                         <td style={{ padding: '9px 12px' }}>
                           {kwhPerKwp != null ? (
                             <div>
@@ -389,9 +401,20 @@ export default function MaintenancePage() {
                                 color: kwhPerKwp < 2.0 ? BRAND.gold : BRAND.text,
                               }}>{fmt(kwhPerKwp, 1)}</span>
                               <span style={{ fontSize: 10, color: BRAND.muted }}> kWh/kWp</span>
-                              {kwhPerKwp < 2.0 && (
-                                <div style={{ fontSize: 10, color: BRAND.gold, marginTop: 1 }}>⚠ Bajo rendimiento</div>
+                              {anomEval?.ratio_pares != null && (
+                                <div style={{ fontSize: 9.5, color: BRAND.dim, marginTop: 1 }}>
+                                  Pares: <b>{(anomEval.ratio_pares * 100).toFixed(0)}%</b>
+                                  {anomEval.z_score_robusto != null && ` · z=${anomEval.z_score_robusto}`}
+                                </div>
                               )}
+                              {anomEval?.anomalia ? (
+                                <div title={anomEval.anomalia.descripcion} style={{ fontSize: 10, color: BRAND.red, fontWeight: 700, marginTop: 2 }}>
+                                  ⚡ {anomEval.anomalia.tipo.replace('_', ' ')}
+                                  {anomEval.cop_perdidos > 0 && ` (-$${Math.round(anomEval.cop_perdidos).toLocaleString('es-CO')})`}
+                                </div>
+                              ) : kwhPerKwp < 2.0 ? (
+                                <div style={{ fontSize: 10, color: BRAND.gold, marginTop: 1 }}>⚠ Bajo rendimiento</div>
+                              ) : null}
                             </div>
                           ) : <span style={{ color: BRAND.dim, fontSize: 11 }}>—</span>}
                         </td>
@@ -557,8 +580,7 @@ export default function MaintenancePage() {
           }}>
             <Info size={13} />
             <span>
-              <strong>* Capacidad estimada:</strong> Para plantas sin capacidad configurada en FusionSolar, se estimó a partir de la generación de hoy y {HSP} HSP.
-              El PR no se calcula para estas plantas. Configura la capacidad instalada en FusionSolar para habilitar el análisis completo.
+              <strong>* Capacidad estimada por histórico (P90):</strong> Para plantas con capacidad nominal en 0 en FusionSolar, se utiliza su capacidad estimada desde la serie histórica en <code>solger.planta</code>, habilitando el cálculo de índice de desempeño, kWh/kWp y detección de anomalías contra plantas vecinas.
             </span>
           </div>
         )}
@@ -659,7 +681,7 @@ function MaintenanceModal({
     notes: '',
   });
 
-  const addRecord = () => {
+  const addRecord = async () => {
     if (!form.date) return;
     const updated = [
       ...records,
@@ -667,6 +689,18 @@ function MaintenanceModal({
     ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     setRecords(updated);
     saveMaintLog(plantCode, updated);
+    try {
+      await api.createMaintenanceOrder({
+        plant_code: plantCode,
+        tipo: form.type,
+        estado: 'completada',
+        titulo: `Mantenimiento: ${form.type}`,
+        descripcion: form.notes,
+        fecha_ejecucion: form.date,
+      });
+    } catch (err) {
+      console.error('Error guardando en solger.orden_trabajo:', err);
+    }
     setForm({ date: new Date().toISOString().slice(0, 10), type: 'limpieza', notes: '' });
   };
 
