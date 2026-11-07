@@ -76,7 +76,13 @@ export function ReportsPage() {
           send_email: false,
         }),
       });
-      const res = await r.json();
+      const rawText = await r.text();
+      let res: any = {};
+      try {
+        res = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        res = { detail: rawText.slice(0, 180) || `HTTP ${r.status}` };
+      }
       if (r.ok && res.success) {
         await fetchMeta();
         setIframeKey(k => k + 1);
@@ -86,16 +92,16 @@ export function ReportsPage() {
             ok: Boolean(tgOk),
             text: tgOk
               ? `Reporte Ejecutivo + gráficos enviados a Telegram (${res.telegram?.detail})`
-              : `Reportes actualizados, pero Telegram respondió: ${res.telegram?.detail || 'Error'}`,
+              : `Reportes generados en vivo, pero Telegram respondió: ${res.telegram?.detail || 'Error'}`,
           });
         } else {
           setToast({
             ok: true,
-            text: `Reportes regenerados con éxito (${res.plantsGenerated} plantas + Cierre Ejecutivo).`,
+            text: `Reportes generados en el momento (${res.plantsGenerated} plantas + Cierre Ejecutivo).`,
           });
         }
       } else {
-        setToast({ ok: false, text: res.detail || 'Error generando los reportes.' });
+        setToast({ ok: false, text: res.detail || `Error generando los reportes (HTTP ${r.status}).` });
       }
     } catch (e: any) {
       setToast({ ok: false, text: e?.message || 'Error de conexión con el servidor.' });

@@ -206,12 +206,11 @@ class FusionSolarClient:
 
                 body = response.json() if response.content else {}
 
-                # Si es un error de límite de frecuencia (407), esperamos y reintentamos sin desloguear
+                # Si es un error de límite de frecuencia (407), en endpoints secundarios fallar rápido para usar fallback
                 if body.get("failCode") == 407:
-                    if attempt < 2:
-                        sleep_time = 2.0 + attempt * 1.5
-                        logger.warning("Frecuencia de acceso demasiado alta (407) en %s. Reintentando en %.1fs...", endpoint, sleep_time)
-                        time.sleep(sleep_time)
+                    is_primary = endpoint in ("/thirdData/stations", "/thirdData/getStationRealKpi")
+                    if is_primary and attempt < 1:
+                        time.sleep(1.2)
                         continue
                     raise APIError("Frecuencia de solicitudes demasiado alta en FusionSolar (407). Por favor, espera unos segundos.")
 

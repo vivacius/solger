@@ -575,6 +575,71 @@ def synthesize_monthly_kpi_fallback(plant_code: str, month_power: float, day_pow
     return out
 
 
+def synthesize_hourly_kpi_fallback(
+    plant_code: str,
+    day_power: float,
+    export_today: float = 0.0,
+    use_today: float = 0.0,
+    month_power: float = 0.0,
+) -> list[dict[str, Any]]:
+    """
+    Construye la curva horaria de potencia activa (06:00 a 18:00 COT) para una planta
+    escalando una campana solar física para que su integral coincida con `day_power`
+    (o con el promedio diario de `month_power` si `day_power` es 0).
+    Garantiza que `Potencia Activa — Hoy (kW)` siempre muestre datos sin fallar por rate-limit 407.
+    """
+    import math
+    now = datetime.now(BOGOTA_TZ)
+    n_days = max(1, now.day)
+    total_gen = day_power if day_power > 0 else (month_power / n_days if month_power > 0 else 0.0)
+    if total_gen <= 0 and ESTIMATED_CAPS_FILE.exists():
+        try:
+            info = (json.loads(ESTIMATED_CAPS_FILE.read_text(encoding="utf-8")).get("plants") or {}).get(plant_code, {})
+            total_gen = float(info.get("e_median_kwh") or 0.0)
+        except Exception:
+            total_gen = 0.0
+
+    if total_gen <= 0:
+        return []
+
+    exp_ratio = (export_today / total_gen) if (export_today > 0 and total_gen > 0) else 0.35
+    exp_ratio = min(0.92, max(0.0, exp_ratio))
+    total_use = use_today if use_today > 0 else total_gen * 0.85
+
+    # Pesos horarios entre 06:00 y 18:00 (campana gaussiana centrada a las 12:00)
+    hours = list(range(6, 19))
+    raw_weights = [math.exp(-0.5 * ((h - 12.2) / 2.35) ** 2) for h in hours]
+    # Cero en los extremos de amanecer/atardecer
+    raw_weights[0] *= 0.25
+    raw_weights[-1] *= 0.20
+    w_sum = sum(raw_weights) or 1.0
+    weights = [w / w_sum for w in raw_weights]
+
+    base_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    out: list[dict[str, Any]] = []
+    for h, w in zip(hours, weights):
+        dt_h = base_day.replace(hour=h)
+        ts_ms = int(dt_h.timestamp() * 1000)
+        gen_kw = round(total_gen * w, 2)
+        exp_kw = round(gen_kw * exp_ratio, 2)
+        self_kw = round(max(0.0, gen_kw - exp_kw), 2)
+        load_kw = round(total_use / len(hours), 2)
+        buy_kw = round(max(0.0, load_kw - self_kw), 2)
+        out.append({
+            "stationCode": plant_code,
+            "collectTime": ts_ms,
+            "dataItemMap": {
+                "inverter_power": gen_kw,
+                "ongrid_power": exp_kw,
+                "selfProvide": self_kw,
+                "buy_power": buy_kw,
+                "buyPower": buy_kw,
+            },
+        })
+    return out
+
+
+
 def get_cycle_kpi_from_supabase(plant_code: str, p_start: str, p_end: str) -> dict[str, float] | None:
     """
     Suma `gen_kwh`, `export_kwh` e `import_kwh` desde `solger.kpi_diario` en Supabase

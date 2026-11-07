@@ -81,6 +81,8 @@ def get_base64_image(path: str) -> str:
     raw = _safe_read_bytes(path)
     if raw:
         b64 = base64.b64encode(raw).decode("utf-8")
+        if raw.lstrip().startswith(b"<svg"):
+            return f"data:image/svg+xml;base64,{b64}"
         ext = os.path.splitext(path)[1].lower().replace(".", "")
         mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/svg+xml" if ext == "svg" else "image/png"
         return f"data:{mime};base64,{b64}"
@@ -298,7 +300,39 @@ def get_safe_filename(name: str) -> str:
 def generate_power_chart(day_data: list, filename: str, month_data: list | None = None) -> bool:
     """Curva de potencia activa horaria (kW): Generación FV, Exportación, Autoconsumo, Importación."""
     if not HAS_MPL:
-        return False
+        raw_items = [
+            item for item in (day_data or [])
+            if 5 <= datetime.fromtimestamp(item.get("collectTime", 0) / 1000).hour <= 20
+        ]
+        if not raw_items:
+            return False
+        w, h = 640, 210
+        pad_l, pad_r, pad_t, pad_b = 46, 18, 22, 30
+        pw, ph = w - pad_l - pad_r, h - pad_t - pad_b
+        vals_gen = [max(0.0, float((it.get("dataItemMap") or {}).get("inverter_power") or 0)) for it in raw_items]
+        vals_exp = [min(max(0.0, float((it.get("dataItemMap") or {}).get("ongrid_power") or 0)), g) for it, g in zip(raw_items, vals_gen)]
+        vals_self = [max(0.0, g - e) for g, e in zip(vals_gen, vals_exp)]
+        max_y = max(max(vals_gen + [1.0]) * 1.15, 1.0)
+        n = max(1, len(raw_items) - 1)
+        def _pts(arr):
+            return " ".join(f"{pad_l + (i / n) * pw:.1f},{pad_t + ph - (v / max_y) * ph:.1f}" for i, v in enumerate(arr))
+        p_gen = _pts(vals_gen)
+        p_self = _pts(vals_self)
+        p_exp = _pts(vals_exp)
+        area_gen = f"{pad_l},{pad_t+ph} {p_gen} {pad_l+pw},{pad_t+ph}"
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">'
+            f'<rect width="{w}" height="{h}" fill="#FAF8F2" rx="8"/>'
+            f'<rect x="{pad_l}" y="{pad_t}" width="{pw}" height="{ph}" fill="#FFFFFF" rx="4"/>'
+            f'<polygon points="{area_gen}" fill="{C_GOLD}" fill-opacity="0.16"/>'
+            f'<polyline fill="none" stroke="{C_GOLD}" stroke-width="2.2" points="{p_gen}"/>'
+            f'<polyline fill="none" stroke="{C_GREEN}" stroke-width="1.6" points="{p_self}"/>'
+            f'<polyline fill="none" stroke="{C_TEAL}" stroke-width="1.6" points="{p_exp}"/>'
+            f'<text x="{pad_l}" y="14" font-family="Segoe UI,sans-serif" font-size="10" fill="{C_MUTED}">Generación FV (pico {max(vals_gen):.1f} kW) · Autoconsumo · Exportación</text>'
+            f'</svg>'
+        )
+        _safe_write_text(filename, svg)
+        return True
     buy_today = 0.0
     load_today = 0.0
     if month_data:
@@ -373,7 +407,38 @@ def generate_power_chart(day_data: list, filename: str, month_data: list | None 
 def generate_monthly_chart(month_data: list, filename: str) -> bool:
     """Barras agrupadas: Autoconsumo + Exportación vs. Importación por día del mes."""
     if not HAS_MPL:
-        return False
+        if not month_data:
+            return False
+        w, h = 640, 210
+        pad_l, pad_r, pad_t, pad_b = 46, 18, 22, 30
+        pw, ph = w - pad_l - pad_r, h - pad_t - pad_b
+        items = month_data[-30:]
+        gens = [max(0.0, float((it.get("dataItemMap") or {}).get("inverter_power") or (it.get("dataItemMap") or {}).get("inverterYield") or 0)) for it in items]
+        exps = [min(max(0.0, float((it.get("dataItemMap") or {}).get("ongrid_power") or 0)), g) for it, g in zip(items, gens)]
+        selfs = [max(0.0, g - e) for g, e in zip(gens, exps)]
+        max_y = max(max(gens + [1.0]) * 1.15, 1.0)
+        slot = pw / max(1, len(items))
+        bw = max(4.0, slot * 0.62)
+        bars_svg = []
+        for i, (s_v, e_v) in enumerate(zip(selfs, exps)):
+            x = pad_l + i * slot + (slot - bw) / 2
+            hs = (s_v / max_y) * ph
+            he = (e_v / max_y) * ph
+            ys = pad_t + ph - hs
+            ye = ys - he
+            bars_svg.append(f'<rect x="{x:.1f}" y="{ys:.1f}" width="{bw:.1f}" height="{hs:.1f}" fill="{C_GREEN}" rx="1.5"/>')
+            if he > 0.5:
+                bars_svg.append(f'<rect x="{x:.1f}" y="{ye:.1f}" width="{bw:.1f}" height="{he:.1f}" fill="{C_TEAL}" rx="1.5"/>')
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">'
+            f'<rect width="{w}" height="{h}" fill="#FAF8F2" rx="8"/>'
+            f'<rect x="{pad_l}" y="{pad_t}" width="{pw}" height="{ph}" fill="#FFFFFF" rx="4"/>'
+            f'{"".join(bars_svg)}'
+            f'<text x="{pad_l}" y="14" font-family="Segoe UI,sans-serif" font-size="10" fill="{C_MUTED}">Balance Diario ({len(items)} días) — Autoconsumo (verde) + Exportación (azul)</text>'
+            f'</svg>'
+        )
+        _safe_write_text(filename, svg)
+        return True
     days, self_v, exp_v, buy_v = [], [], [], []
     for item in month_data:
         ts = item.get("collectTime", 0)
@@ -422,8 +487,40 @@ def generate_portfolio_chart(plants_data: list, filename: str) -> bool:
     Barra horizontal por planta: generación real vs esperada.
     Color por estado de salud. Muestra PR% como etiqueta.
     """
-    if not HAS_MPL or not plants_data:
+    if not plants_data:
         return False
+    if not HAS_MPL:
+        w = 640
+        row_h = 28
+        pad_t, pad_b, pad_l, pad_r = 26, 20, 145, 70
+        h = pad_t + pad_b + len(plants_data) * row_h
+        pw = w - pad_l - pad_r
+        max_x = max(max([d.get("expected") or 1.0 for d in plants_data] + [d.get("day_power") or 1.0 for d in plants_data]) * 1.15, 1.0)
+        rows_svg = []
+        for i, d in enumerate(plants_data):
+            y = pad_t + i * row_h
+            nm = str(d.get("name", ""))[:20]
+            act = float(d.get("day_power") or 0)
+            exp = float(d.get("expected") or 0)
+            pr = d.get("pr")
+            w_exp = (exp / max_x) * pw
+            w_act = (act / max_x) * pw
+            clr = C_GREEN if d.get("health") == 3 else C_GOLD if d.get("health") == 2 else C_RED
+            pr_lbl = f"{pr:.0f}% PR" if pr is not None else f"{act:.0f} kWh"
+            rows_svg.append(
+                f'<text x="{pad_l - 8}" y="{y + 16}" text-anchor="end" font-family="Segoe UI,sans-serif" font-size="10.5" fill="{C_DARK}" font-weight="600">{nm}</text>'
+                f'<rect x="{pad_l}" y="{y + 5}" width="{w_exp:.1f}" height="14" fill="#E2E8F0" rx="3"/>'
+                f'<rect x="{pad_l}" y="{y + 7}" width="{w_act:.1f}" height="10" fill="{clr}" rx="3"/>'
+                f'<text x="{pad_l + max(w_act, w_exp) + 6:.1f}" y="{y + 16}" font-family="Segoe UI,sans-serif" font-size="10" fill="{C_DARK}" font-weight="700">{pr_lbl}</text>'
+            )
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">'
+            f'<rect width="{w}" height="{h}" fill="#FAF8F2" rx="8"/>'
+            f'{"".join(rows_svg)}'
+            f'</svg>'
+        )
+        _safe_write_text(filename, svg)
+        return True
 
     fig_h = max(3.0, len(plants_data) * 0.6 + 1.2)
     fig, ax = plt.subplots(figsize=(8, fig_h), dpi=120)
@@ -474,9 +571,40 @@ def generate_hsp_chart(plants_data: list, filename: str) -> bool:
     Barras de HSP real por planta (calculado desde generación/capacidad).
     Línea de referencia en 4.5 h/día. Coloreado por nivel de rendimiento.
     """
-    if not HAS_MPL:
-        return False
     data = [d for d in plants_data if d.get('capacity', 0) > 0 and d.get('day_power', 0) > 0]
+    if not data:
+        return False
+    if not HAS_MPL:
+        w, h = 640, 220
+        pad_l, pad_r, pad_t, pad_b = 42, 18, 24, 48
+        pw, ph = w - pad_l - pad_r, h - pad_t - pad_b
+        max_y = max(max([float(d.get("hsp_real") or 0) for d in data] + [HSP_REF]) * 1.2, 5.5)
+        slot = pw / max(1, len(data))
+        bw = min(32.0, slot * 0.58)
+        bars_svg = []
+        for i, d in enumerate(data):
+            val = float(d.get("hsp_real") or 0)
+            bh = (val / max_y) * ph
+            x = pad_l + i * slot + (slot - bw) / 2
+            y = pad_t + ph - bh
+            clr = C_GREEN if val >= 3.8 else C_GOLD if val >= 2.5 else C_RED
+            nm = str(d.get("name", "")).replace("HDA ", "").replace("HACIENDA ", "")[:11]
+            bars_svg.append(
+                f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{bh:.1f}" fill="{clr}" rx="3"/>'
+                f'<text x="{x + bw/2:.1f}" y="{y - 4:.1f}" text-anchor="middle" font-family="Segoe UI,sans-serif" font-size="9.5" font-weight="700" fill="{C_DARK}">{val:.1f}h</text>'
+                f'<text x="{x + bw/2:.1f}" y="{pad_t + ph + 16:.1f}" text-anchor="middle" font-family="Segoe UI,sans-serif" font-size="8.5" fill="{C_MUTED}">{nm}</text>'
+            )
+        y_ref = pad_t + ph - (HSP_REF / max_y) * ph
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">'
+            f'<rect width="{w}" height="{h}" fill="#FAF8F2" rx="8"/>'
+            f'<rect x="{pad_l}" y="{pad_t}" width="{pw}" height="{ph}" fill="#FFFFFF" rx="4"/>'
+            f'<line x1="{pad_l}" y1="{y_ref:.1f}" x2="{pad_l + pw}" y2="{y_ref:.1f}" stroke="{C_DIM}" stroke-dasharray="4,4" stroke-width="1.4"/>'
+            f'{"".join(bars_svg)}'
+            f'</svg>'
+        )
+        _safe_write_text(filename, svg)
+        return True
     if not data:
         return False
 
@@ -1273,8 +1401,11 @@ def run_report_pipeline(
     base_dir = os.path.dirname(os.path.abspath(__file__))
     processed_dir = os.path.join(base_dir, "data", "processed")
     plants_dir = os.path.join(processed_dir, "plants")
-    os.makedirs(processed_dir, exist_ok=True)
-    os.makedirs(plants_dir, exist_ok=True)
+    try:
+        os.makedirs(processed_dir, exist_ok=True)
+        os.makedirs(plants_dir, exist_ok=True)
+    except Exception:
+        pass
 
     if data is None:
         data = fetch_data_from_proxy()
