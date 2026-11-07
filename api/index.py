@@ -1,15 +1,11 @@
 """
-Punto de entrada Serverless para Vercel (/api/* -> FastAPI).
+Entrypoint Serverless de FastAPI para despliegue unificado en Vercel (`/api/*`).
 """
-from __future__ import annotations
-
+import os
 import sys
-from pathlib import Path
 
-# Añadir el directorio backend al path para resolver los imports internos
-BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
+BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../backend"))
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 
 from main import app  # noqa: E402, F401
-
