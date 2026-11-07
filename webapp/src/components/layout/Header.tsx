@@ -1,17 +1,25 @@
-import { useLocation, NavLink, Link } from 'react-router-dom';
-import { RefreshCw, Bell, MapPin, Calendar, ArrowLeft } from 'lucide-react';
+import { useLocation, useNavigate, NavLink, Link } from 'react-router-dom';
+import { RefreshCw, Bell, MapPin, Calendar, ArrowLeft, Shield, Building2 } from 'lucide-react';
 import { BRAND } from '../../lib/utils';
 import { api } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
 
-const NAV_ITEMS = [
-  { to: '/',              label: 'Dashboard' },
-  { to: '/plantas',       label: 'Plantas'   },
-  { to: '/mapa',          label: 'Mapa'      },
-  { to: '/alertas',       label: 'Alertas', badge: true },
-  { to: '/comparar',      label: 'Comparar'  },
-  { to: '/mantenimiento', label: 'Mantenimiento' },
-  { to: '/mercado',       label: 'Mercado'   },
-  { to: '/facturacion',   label: 'Facturación' },
+const NAV_ITEMS_ANALYST = [
+  { to: '/',               label: 'Dashboard' },
+  { to: '/plantas',        label: 'Plantas'   },
+  { to: '/mapa',           label: 'Mapa'      },
+  { to: '/alertas',        label: 'Alertas', badge: true },
+  { to: '/comparar',       label: 'Comparar'  },
+  { to: '/mantenimiento',  label: 'Mantenimiento' },
+  { to: '/mercado',        label: 'Mercado'   },
+  { to: '/facturacion',    label: 'Facturación' },
+  { to: '/portal-cliente', label: 'Portal B2B' },
+];
+
+const NAV_ITEMS_CLIENT = [
+  { to: '/portal-cliente', label: 'Mi Portal Solar' },
+  { to: '/plantas',        label: 'Plantas' },
+  { to: '/mapa',           label: 'Mapa' },
 ];
 
 function fmtHeaderDate(): string {
@@ -28,6 +36,10 @@ interface HeaderProps {
 
 export function Header({ lastUpdated, onRefresh, loading }: HeaderProps) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, setRoleView } = useAuth();
+  const isClientRole = user.rol === 'cliente';
+  const navItems = isClientRole ? NAV_ITEMS_CLIENT : NAV_ITEMS_ANALYST;
 
   // Detecta si es una ruta de detalle de planta
   const isPlantDetail = location.pathname.startsWith('/plantas/') && location.pathname !== '/plantas';
@@ -110,7 +122,7 @@ export function Header({ lastUpdated, onRefresh, loading }: HeaderProps) {
 
       {/* ── Centro: Navegación Horizontal — oculto en móvil ─── */}
       <nav className="header-nav-desktop" style={{ display: 'flex', alignItems: 'center', gap: 4, height: '100%', flexWrap: 'nowrap', overflow: 'hidden' }}>
-        {NAV_ITEMS.map(({ to, label, badge }) => {
+        {navItems.map(({ to, label, badge }: { to: string; label: string; badge?: boolean }) => {
           const active = isActive(to);
           return (
             <NavLink
@@ -164,6 +176,43 @@ export function Header({ lastUpdated, onRefresh, loading }: HeaderProps) {
 
       {/* ── Derecha: Sincronización y Métricas — oculto en móvil ── */}
       <div className="header-widgets-desktop" style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        {/* Selector rápido de Rol (Centro O&M vs Portal Cliente B2B) */}
+        <button
+          onClick={() => {
+            if (isClientRole) {
+              setRoleView('analista');
+              navigate('/');
+            } else {
+              setRoleView('cliente');
+              navigate('/portal-cliente');
+            }
+          }}
+          title={
+            isClientRole
+              ? 'Cambiar a Vista Analista Centro de Operaciones SOLGER'
+              : 'Previsualizar Portal Cliente B2B (Vista Dueño de Planta)'
+          }
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '4px 9px',
+            borderRadius: 6,
+            border: isClientRole
+              ? '1px solid rgba(37,99,235,0.28)'
+              : '1px solid rgba(15,23,42,0.12)',
+            background: isClientRole ? 'rgba(37,99,235,0.08)' : 'white',
+            color: isClientRole ? '#1D4ED8' : '#334155',
+            fontSize: 11.5,
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+          }}
+        >
+          {isClientRole ? <Building2 size={12} /> : <Shield size={12} color="#3D8A1F" />}
+          <span>{isClientRole ? 'Vista: Cliente B2B' : 'Rol: Analista O&M'}</span>
+        </button>
+
         {/* Ubicación */}
         <div
           style={{

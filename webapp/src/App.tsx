@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
+import { AuthProvider, useAuth } from './lib/auth';
 import Dashboard from './pages/Dashboard';
 import Plants from './pages/Plants';
 import PlantDetail from './pages/PlantDetail';
@@ -11,9 +12,33 @@ import MaintenancePage from './pages/MaintenancePage';
 import LandingPage from './pages/LandingPage';
 import MarketPage from './pages/MarketPage';
 import InvoicePage from './pages/InvoicePage';
+import ClientPortalPage from './pages/ClientPortalPage';
 
 // Persist "already entered" for the current browser session
 const SESSION_KEY = 'cie_started';
+
+function AppRoutes() {
+  const { user } = useAuth();
+  const isClient = user.rol === 'cliente';
+
+  return (
+    <Routes>
+      <Route path="/" element={<Layout />}>
+        <Route index element={isClient ? <ClientPortalPage /> : <Dashboard />} />
+        <Route path="portal-cliente" element={<ClientPortalPage />} />
+        <Route path="plantas" element={<Plants />} />
+        <Route path="plantas/:plantCode" element={<PlantDetail />} />
+        <Route path="mapa" element={<MapPage />} />
+        <Route path="alertas" element={<AlertsPage />} />
+        <Route path="comparar" element={<ComparePage />} />
+        <Route path="mantenimiento" element={<MaintenancePage />} />
+        <Route path="mercado" element={<MarketPage />} />
+        <Route path="facturacion" element={<InvoicePage />} />
+        <Route path="*" element={isClient ? <ClientPortalPage /> : <Dashboard />} />
+      </Route>
+    </Routes>
+  );
+}
 
 export default function App() {
   const [started, setStarted] = useState<boolean>(
@@ -30,21 +55,10 @@ export default function App() {
   }
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="plantas" element={<Plants />} />
-          <Route path="plantas/:plantCode" element={<PlantDetail />} />
-          <Route path="mapa" element={<MapPage />} />
-          <Route path="alertas" element={<AlertsPage />} />
-          <Route path="comparar" element={<ComparePage />} />
-          <Route path="mantenimiento" element={<MaintenancePage />} />
-          <Route path="mercado" element={<MarketPage />} />
-          <Route path="facturacion" element={<InvoicePage />} />
-          <Route path="*" element={<Dashboard />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
