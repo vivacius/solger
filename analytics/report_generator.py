@@ -12,6 +12,7 @@ Uso:
 """
 
 import os
+import io
 import sys
 import base64
 import smtplib
@@ -22,17 +23,67 @@ from email.mime.image import MIMEImage
 from datetime import datetime
 from dotenv import load_dotenv
 
-def get_base64_image(path: str) -> str:
-    """Convierte una imagen local a formato data URI base64 para visualización directa en navegador."""
-    if path and os.path.exists(path):
+# Caché en memoria para imágenes/HTML (evita errores de bloqueo OneDrive Errno 22 y soporta entornos serverless /tmp)
+_MEM_BINARY_CACHE: dict[str, bytes] = {}
+
+
+def _safe_savefig(filename: str, facecolor: str) -> None:
+    """Guarda la figura matplotlib en memoria y en disco evitando bloqueos de OneDrive (Errno 22)."""
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", facecolor=facecolor, bbox_inches="tight")
+    data_bytes = buf.getvalue()
+    _MEM_BINARY_CACHE[os.path.abspath(filename)] = data_bytes
+    try:
+        if os.path.exists(filename):
+            try:
+                os.remove(filename)
+            except Exception:
+                pass
+        with open(filename, "wb") as f:
+            f.write(data_bytes)
+    except Exception:
+        pass
+
+
+def _safe_write_text(filename: str, content: str) -> None:
+    """Escribe un archivo de texto/HTML evitando bloqueos de placeholders de OneDrive."""
+    data_bytes = content.encode("utf-8")
+    _MEM_BINARY_CACHE[os.path.abspath(filename)] = data_bytes
+    try:
+        if os.path.exists(filename):
+            try:
+                os.remove(filename)
+            except Exception:
+                pass
+        with open(filename, "wb") as f:
+            f.write(data_bytes)
+    except Exception:
+        pass
+
+
+def _safe_read_bytes(path: str) -> bytes | None:
+    if not path:
+        return None
+    abs_p = os.path.abspath(path)
+    if abs_p in _MEM_BINARY_CACHE:
+        return _MEM_BINARY_CACHE[abs_p]
+    if os.path.exists(path):
         try:
             with open(path, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode("utf-8")
-                ext = os.path.splitext(path)[1].lower().replace(".", "")
-                mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/svg+xml" if ext == "svg" else "image/png"
-                return f"data:{mime};base64,{b64}"
+                return f.read()
         except Exception:
-            pass
+            return None
+    return None
+
+
+def get_base64_image(path: str) -> str:
+    """Convierte una imagen local o en memoria a formato data URI base64."""
+    raw = _safe_read_bytes(path)
+    if raw:
+        b64 = base64.b64encode(raw).decode("utf-8")
+        ext = os.path.splitext(path)[1].lower().replace(".", "")
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/svg+xml" if ext == "svg" else "image/png"
+        return f"data:{mime};base64,{b64}"
     return ""
 
 def get_logo_path() -> str:
@@ -282,7 +333,7 @@ def generate_power_chart(day_data: list, filename: str, month_data: list | None 
                 ha='center', va='center', color=C_DIM, fontsize=10)
         ax.set_xticks([]); ax.set_yticks([])
         plt.tight_layout()
-        plt.savefig(filename, facecolor=C_BG, bbox_inches='tight')
+        _safe_savefig(filename, facecolor=C_BG)
         plt.close()
         return False
 
@@ -304,7 +355,7 @@ def generate_power_chart(day_data: list, filename: str, month_data: list | None 
     ax.yaxis.grid(True, linestyle='--', alpha=0.4, color=C_BORDER)
     ax.legend(frameon=False, loc='upper left', fontsize=8, labelcolor=C_MUTED, ncol=4)
     plt.tight_layout()
-    plt.savefig(filename, facecolor=C_BG, bbox_inches='tight')
+    _safe_savefig(filename, facecolor=C_BG)
     plt.close()
     return True
 
@@ -332,7 +383,7 @@ def generate_monthly_chart(month_data: list, filename: str) -> bool:
                 ha='center', va='center', color=C_DIM, fontsize=10)
         ax.set_xticks([]); ax.set_yticks([])
         plt.tight_layout()
-        plt.savefig(filename, facecolor=C_BG, bbox_inches='tight')
+        _safe_savefig(filename, facecolor=C_BG)
         plt.close()
         return False
 
@@ -349,7 +400,7 @@ def generate_monthly_chart(month_data: list, filename: str) -> bool:
     ax.yaxis.grid(True, linestyle='--', alpha=0.4, color=C_BORDER)
     ax.legend(frameon=False, loc='upper right', fontsize=8, labelcolor=C_MUTED)
     plt.tight_layout()
-    plt.savefig(filename, facecolor=C_BG, bbox_inches='tight')
+    _safe_savefig(filename, facecolor=C_BG)
     plt.close()
     return True
 
@@ -401,7 +452,7 @@ def generate_portfolio_chart(plants_data: list, filename: str) -> bool:
     ax.legend(handles=legend_patches, frameon=False, loc='lower right',
               fontsize=7.5, labelcolor=C_MUTED, ncol=2)
     plt.tight_layout()
-    plt.savefig(filename, facecolor=C_BG, bbox_inches='tight')
+    _safe_savefig(filename, facecolor=C_BG)
     plt.close()
     return True
 
@@ -448,7 +499,7 @@ def generate_hsp_chart(plants_data: list, filename: str) -> bool:
     ax.legend(handles=legend_patches, frameon=False, fontsize=7.5,
               labelcolor=C_MUTED, loc='upper right')
     plt.tight_layout()
-    plt.savefig(filename, facecolor=C_BG, bbox_inches='tight')
+    _safe_savefig(filename, facecolor=C_BG)
     plt.close()
     return True
 
@@ -1075,28 +1126,28 @@ def send_telegram_notification(
 
         # Enviar gráficos PNG adjuntos si existen
         for cp in (chart_paths or []):
-            if cp and os.path.exists(cp):
+            raw_img = _safe_read_bytes(cp) if cp else None
+            if raw_img:
                 try:
-                    with open(cp, "rb") as img_f:
-                        requests.post(
-                            f"{base_tg}/sendPhoto",
-                            data={"chat_id": chat_id},
-                            files={"photo": (os.path.basename(cp), img_f, "image/png")},
-                            timeout=20,
-                        )
+                    requests.post(
+                        f"{base_tg}/sendPhoto",
+                        data={"chat_id": chat_id},
+                        files={"photo": (os.path.basename(cp), raw_img, "image/png")},
+                        timeout=20,
+                    )
                 except Exception:
                     pass
 
         # Enviar el archivo HTML completo del reporte adjunto para abrirlo desde Telegram
-        if html_report_path and os.path.exists(html_report_path):
+        raw_doc = _safe_read_bytes(html_report_path) if html_report_path else None
+        if raw_doc:
             try:
-                with open(html_report_path, "rb") as doc_f:
-                    requests.post(
-                        f"{base_tg}/sendDocument",
-                        data={"chat_id": chat_id, "caption": f"📄 {caption_title} (HTML interactivo con gráficos)"},
-                        files={"document": (os.path.basename(html_report_path), doc_f, "text/html")},
-                        timeout=25,
-                    )
+                requests.post(
+                    f"{base_tg}/sendDocument",
+                    data={"chat_id": chat_id, "caption": f"📄 {caption_title} (HTML interactivo con gráficos)"},
+                    files={"document": (os.path.basename(html_report_path), raw_doc, "text/html")},
+                    timeout=25,
+                )
             except Exception:
                 pass
 
@@ -1266,10 +1317,8 @@ def run_report_pipeline(
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     exec_path = os.path.join(processed_dir, f"reporte_ejecutivo_{ts}.html")
     latest_exec_path = os.path.join(processed_dir, "reporte_ejecutivo_latest.html")
-    with open(exec_path, "w", encoding="utf-8") as f:
-        f.write(html_exec_file)
-    with open(latest_exec_path, "w", encoding="utf-8") as f:
-        f.write(html_exec_file)
+    _safe_write_text(exec_path, html_exec_file)
+    _safe_write_text(latest_exec_path, html_exec_file)
 
     html_exec_email = build_executive_html_report(
         data,
@@ -1305,8 +1354,7 @@ def run_report_pipeline(
                 monthly_chart_src=mon_b64 or "cid:monthly_chart",
             )
             plant_file_path = os.path.join(plants_dir, f"{safe}.html")
-            with open(plant_file_path, "w", encoding="utf-8") as f:
-                f.write(p_html_file)
+            _safe_write_text(plant_file_path, p_html_file)
             generated_plants.append({
                 "plantCode": pcode,
                 "plantName": p.get("plantName", pcode),

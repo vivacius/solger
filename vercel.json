@@ -1,16 +1,16 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "cd webapp && npm install && npm run build",
+  "buildCommand": "npm --prefix webapp install && npm --prefix webapp run build",
   "outputDirectory": "webapp/dist",
+  "framework": null,
   "rewrites": [
     {
       "source": "/api/(.*)",
       "destination": "/api/index.py"
     },
     {
-      "source": "/((?!api/).*)",
+      "source": "/((?!api/|assets/|logo\\.png|banner_video\\.mp4|favicon).*)",
       "destination": "/index.html"
     }
   ]
 }
-
