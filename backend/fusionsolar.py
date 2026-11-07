@@ -4,10 +4,12 @@ Maneja automáticamente la autenticación y renovación del token XSRF.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -20,6 +22,7 @@ from config import settings
 
 logger = logging.getLogger("solger.fusionsolar")
 BOGOTA_TZ = ZoneInfo("America/Bogota")
+_SNAP_DIR = Path(__file__).parent.parent / "data" / "processed"
 
 
 class FusionSolarError(Exception):
@@ -246,8 +249,28 @@ class FusionSolarClient:
             return entry.data
         return None
 
+    def _cache_get_stale(self, key: str) -> Any | None:
+        entry = self._cache.get(key)
+        return entry.data if entry else None
+
     def _cache_set(self, key: str, data: Any, ttl: int | None = None) -> None:
         self._cache[key] = CacheEntry(data, ttl or settings.CACHE_TTL)
+
+    def _save_snapshot(self, name: str, data: Any) -> None:
+        try:
+            _SNAP_DIR.mkdir(parents=True, exist_ok=True)
+            (_SNAP_DIR / name).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _load_snapshot(self, name: str) -> Any | None:
+        try:
+            p = _SNAP_DIR / name
+            if p.exists():
+                return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return None
 
     # ─── Endpoints de Negocio ─────────────────────────────────────────────────
 
@@ -256,25 +279,33 @@ class FusionSolarClient:
         cache_key = f"plants_p{page}_{page_size}"
         if cached := self._cache_get(cache_key):
             return cached
-        data = self._post(
-            "/thirdData/stations",
-            {"pageNo": page, "pageSize": page_size},
-        )
-        # Si se pide la primera página, recorrer páginas adicionales si existen
-        if page == 1:
-            body_data = data.get("data") or {}
-            plants = list(body_data.get("list") or [])
-            page_count = int(body_data.get("pageCount") or 1)
-            for p in range(2, page_count + 1):
-                more = self._post(
-                    "/thirdData/stations",
-                    {"pageNo": p, "pageSize": page_size},
-                )
-                plants.extend((more.get("data") or {}).get("list") or [])
-            if isinstance(data.get("data"), dict):
-                data["data"]["list"] = plants
-        self._cache_set(cache_key, data)
-        return data
+        try:
+            data = self._post(
+                "/thirdData/stations",
+                {"pageNo": page, "pageSize": page_size},
+            )
+            # Si se pide la primera página, recorrer páginas adicionales si existen
+            if page == 1:
+                body_data = data.get("data") or {}
+                plants = list(body_data.get("list") or [])
+                page_count = int(body_data.get("pageCount") or 1)
+                for p in range(2, page_count + 1):
+                    more = self._post(
+                        "/thirdData/stations",
+                        {"pageNo": p, "pageSize": page_size},
+                    )
+                    plants.extend((more.get("data") or {}).get("list") or [])
+                if isinstance(data.get("data"), dict):
+                    data["data"]["list"] = plants
+            self._cache_set(cache_key, data, ttl=900)
+            self._save_snapshot("last_plants.json", data)
+            return data
+        except Exception as exc:
+            if stale := (self._cache_get_stale(cache_key) or self._load_snapshot("last_plants.json")):
+                logger.warning("Usando snapshot local de plantas ante rate-limit FusionSolar: %s", exc)
+                self._cache_set(cache_key, stale, ttl=120)
+                return stale
+            raise
 
     def get_station_real_kpi(self, plant_codes: list[str]) -> dict:
         """KPIs en tiempo real para una o varias plantas (en lotes de hasta 100)."""
@@ -282,19 +313,54 @@ class FusionSolarClient:
         cache_key = f"real_kpi_{codes_str}"
         if cached := self._cache_get(cache_key):
             return cached
-        all_items: list[dict] = []
-        last_resp: dict = {"success": True, "data": []}
-        for i in range(0, len(plant_codes), 100):
-            chunk = ",".join(plant_codes[i : i + 100])
-            resp = self._post(
-                "/thirdData/getStationRealKpi",
-                {"stationCodes": chunk},
-            )
-            last_resp = resp
-            all_items.extend(resp.get("data") or [])
-        last_resp["data"] = all_items
-        self._cache_set(cache_key, last_resp, ttl=900)  # 15 min
-        return last_resp
+
+        # Si piden 1 sola planta y no está en cache directa, buscar en el snapshot global
+        if len(plant_codes) == 1:
+            single_code = plant_codes[0]
+            if snap := self._load_snapshot("last_real_kpi.json"):
+                matched = [
+                    it for it in (snap.get("data") or [])
+                    if (it.get("stationCode") or it.get("plantCode")) == single_code
+                ]
+                if matched:
+                    single_resp = {"success": True, "data": matched}
+                    self._cache_set(cache_key, single_resp, ttl=300)
+                    return single_resp
+
+        try:
+            all_items: list[dict] = []
+            last_resp: dict = {"success": True, "data": []}
+            for i in range(0, len(plant_codes), 100):
+                chunk = ",".join(plant_codes[i : i + 100])
+                resp = self._post(
+                    "/thirdData/getStationRealKpi",
+                    {"stationCodes": chunk},
+                )
+                last_resp = resp
+                all_items.extend(resp.get("data") or [])
+            last_resp["data"] = all_items
+            self._cache_set(cache_key, last_resp, ttl=900)  # 15 min
+            # Cachear también cada planta individualmente para que PlantDetail sea instantáneo
+            for item in all_items:
+                c = item.get("stationCode") or item.get("plantCode")
+                if c:
+                    self._cache_set(f"real_kpi_{c}", {"success": True, "data": [item]}, ttl=900)
+            if len(plant_codes) > 1:
+                self._save_snapshot("last_real_kpi.json", last_resp)
+            return last_resp
+        except Exception as exc:
+            if stale := (self._cache_get_stale(cache_key) or self._load_snapshot("last_real_kpi.json")):
+                logger.warning("Usando snapshot local de RealKPI ante rate-limit 407: %s", exc)
+                if len(plant_codes) == 1:
+                    single_code = plant_codes[0]
+                    matched = [
+                        it for it in (stale.get("data") or [])
+                        if (it.get("stationCode") or it.get("plantCode")) == single_code
+                    ]
+                    return {"success": True, "data": matched}
+                self._cache_set(cache_key, stale, ttl=120)
+                return stale
+            raise
 
     def get_station_kpi_day(self, plant_code: str, date: str) -> dict:
         """KPI por hora de una planta en un día (YYYYMMDD) en hora Colombia."""

@@ -12,7 +12,7 @@ import { KpiCard } from '../components/ui/KpiCard';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { LoadingSpinner, SkeletonCard } from '../components/ui/States';
 import { Header } from '../components/layout/Header';
-import { fmtEnergy, fmt, fmtDate, extractRegion, BRAND } from '../lib/utils';
+import { fmtEnergy, fmt, fmtDate, extractRegion, calcCO2, BRAND } from '../lib/utils';
 
 /* ── Shared card style ─────────────────────────────────────────── */
 const SC = {
@@ -86,7 +86,12 @@ export default function PlantDetail() {
   const { data: summaryData } = useFetch(api.getSummary, []);
 
   const plant = summaryData?.plants.find(p => p.plantCode === plantCode);
-  const dim = kpiData?.kpi?.dataItemMap ?? {};
+  const summaryKpi = summaryData?.kpis.find(
+    k => (k.plantCode ?? k.stationCode) === plantCode
+  );
+  const dim = (kpiData?.kpi?.dataItemMap && Object.keys(kpiData.kpi.dataItemMap).length > 0)
+    ? kpiData.kpi.dataItemMap
+    : (summaryKpi?.dataItemMap ?? {});
 
   /* ── Energy balance math ─────────────────────────────────────── */
   const todayDim = useMemo(() => {
@@ -95,7 +100,7 @@ export default function PlantDetail() {
     return list[list.length - 1].dataItemMap as Record<string, number> | null;
   }, [monthData]);
 
-  const genToday = dim.day_power ?? todayDim?.inverterYield ?? 0;
+  const genToday = dim.day_power ?? todayDim?.inverter_power ?? todayDim?.inverterYield ?? todayDim?.PVYield ?? 0;
   const exportRaw = dim.day_on_grid_energy ?? todayDim?.ongrid_power ?? 0;
   const exportToday = Math.min(exportRaw, genToday);
   const selfToday = Math.max(0, genToday - exportToday);
@@ -150,10 +155,10 @@ export default function PlantDetail() {
     return ((monthData?.data ?? []) as Array<Record<string, unknown>>).map(item => {
       const ts = item.collectTime as number ?? 0;
       const d = (item.dataItemMap ?? {}) as Record<string, number>;
-      const gen = Math.max(0, d.inverterYield ?? 0);
+      const gen = Math.max(0, d.inverter_power ?? d.inverterYield ?? d.PVYield ?? 0);
       const exp = Math.min(Math.max(0, d.ongrid_power ?? 0), gen);
       const self = Math.min(d.selfUsePower ?? d.selfProvide ?? Math.max(0, gen - exp), gen);
-      const buy = Math.max(0, d.buyPower ?? 0);
+      const buy = Math.max(0, d.buyPower ?? d.buy_power ?? 0);
       return {
         day: new Date(ts).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }),
         'Autoconsumo': +self.toFixed(1),
@@ -202,13 +207,13 @@ export default function PlantDetail() {
 
         {/* ── 2. KPI principales (Mini) ───────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-          {kpiLoading && !kpiData
+          {kpiLoading && !kpiData && !summaryKpi
             ? Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
             : <>
               <KpiCard title="Generación Hoy" value={fmtEnergy(genToday || null)} accent="solar" icon={<Sun size={15} />} />
               <KpiCard title="Generación del Mes" value={fmtEnergy(dim.month_power ?? null)} accent="teal" icon={<TrendingUp size={15} />} />
               <KpiCard title="Generación Total" value={fmtEnergy(dim.total_power ?? null)} accent="teal" />
-              <KpiCard title="CO₂ Evitado" value={fmt((dim.total_power ?? 0) * 0.000385, 1)} unit="ton" accent="green" />
+              <KpiCard title="CO₂ Evitado (UPME)" value={fmt(calcCO2(dim.total_power ?? 0), 1)} unit="ton" accent="green" />
             </>
           }
         </div>
@@ -373,8 +378,11 @@ export default function PlantDetail() {
 
           {/* Gráfico de balance mensual */}
           <div style={SC}>
-            <div style={{ padding: '8px 14px', borderBottom: `1px solid ${BRAND.border}` }}>
+            <div style={{ padding: '8px 14px', borderBottom: `1px solid ${BRAND.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <p className="section-title" style={{ fontSize: 13 }}>Balance de Energía — Mes (kWh)</p>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 99, background: BRAND.greenL, color: BRAND.greenD }}>
+                Supabase · solger.kpi_diario
+              </span>
             </div>
             <div style={{ padding: '8px' }}>
               {monthLoading ? (
