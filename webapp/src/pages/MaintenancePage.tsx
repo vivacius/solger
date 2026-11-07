@@ -170,7 +170,11 @@ export default function MaintenancePage() {
       );
       const dim = kpi?.dataItemMap ?? {};
 
-      const dayPower     = dim.day_power ?? 0;
+      const anomEval  = anomaliesData?.evaluations?.find(e => e.plant_code === plant.plantCode);
+      const rawDayPower  = dim.day_power ?? 0;
+      const monthPower   = dim.month_power ?? 0;
+      const daysElapsed  = Math.max(1, new Date().getDate());
+      const dayPower     = rawDayPower > 0 ? rawDayPower : (anomEval?.gen_kwh || (monthPower > 0 ? monthPower / daysElapsed : 0));
       const capacity     = plant.capacity ?? 0;
       const capEstimated = Boolean(plant.capacityEstimated) || (plant.capacityNominal ?? capacity) <= 0;
 
@@ -181,7 +185,6 @@ export default function MaintenancePage() {
         : null;
 
       const kwhPerKwp = capacity > 0 ? dayPower / capacity : null;
-      const anomEval  = anomaliesData?.evaluations?.find(e => e.plant_code === plant.plantCode);
 
       const health   = dim.real_health_state ?? 0;
       const hasAlarm = alertsData?.alarms.some(
@@ -272,6 +275,170 @@ export default function MaintenancePage() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* ── PANEL DE DIAGNÓSTICO ESTADÍSTICO DE ANOMALÍAS (4 CAPAS — SUPABASE) ─── */}
+        <div style={{ ...SC, borderTop: `3px solid ${BRAND.teal}` }}>
+          <div style={{
+            padding: '10px 16px',
+            borderBottom: `1px solid ${BRAND.border}`,
+            background: 'linear-gradient(90deg, rgba(36,165,174,0.06) 0%, rgba(88,174,50,0.04) 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 8,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Activity size={15} color={BRAND.teal} />
+              <div>
+                <p className="section-title" style={{ fontSize: 13.5, margin: 0 }}>
+                  Motor Estadístico de Detección de Anomalías (4 Capas · Supabase <code>solger.kpi_diario</code>)
+                </p>
+                <p style={{ fontSize: 11, color: BRAND.muted, margin: 0 }}>
+                  Evalúa cada planta sin piranómetro cruzando: (1) Reglas duras, (2) Esperado físico P50, (3) Ratio vs. plantas vecinas del Valle y (4) Z-Score robusto MAD + EWMA (Soiling)
+                </p>
+              </div>
+            </div>
+            <span style={{
+              fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 99,
+              background: BRAND.tealL, color: BRAND.teal,
+            }}>
+              {anomaliesData?.anomaliesCount ?? 0} anomalías detectadas hoy
+            </span>
+          </div>
+
+          {/* Resumen de las 4 capas estadísticas */}
+          {(() => {
+            const evals = anomaliesData?.evaluations ?? [];
+            const validYfs = evals.map(e => e.yf_kwh_kwp).filter((v): v is number => v != null && v > 0).sort((a, b) => a - b);
+            const medianYf = validYfs.length > 0 ? validYfs[Math.floor(validYfs.length / 2)] : 0;
+            const totalLostKwh = evals.reduce((s, e) => s + (e.kwh_perdidos || 0), 0);
+            const totalLostCop = evals.reduce((s, e) => s + (e.cop_perdidos || 0), 0);
+            const lowPeerCount = evals.filter(e => e.ratio_pares != null && e.ratio_pares < 0.85).length;
+
+            return (
+              <div style={{ padding: '12px 16px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginBottom: 12 }}>
+                  <div style={{ padding: '10px 12px', borderRadius: 8, background: BRAND.surface, border: `1px solid ${BRAND.border}` }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.muted, textTransform: 'uppercase' }}>
+                      Capa 3 · Mediana Clúster Valle
+                    </span>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: BRAND.teal, marginTop: 2 }}>
+                      {fmt(medianYf, 2)} <span style={{ fontSize: 11, fontWeight: 600, color: BRAND.muted }}>kWh/kWp·día</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: BRAND.dim, marginTop: 2 }}>
+                      Referencia solar real entre pares sin piranómetro
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '10px 12px', borderRadius: 8, background: BRAND.surface, border: `1px solid ${BRAND.border}` }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.muted, textTransform: 'uppercase' }}>
+                      Desviación entre Pares (&lt;85%)
+                    </span>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: lowPeerCount > 0 ? '#92400E' : BRAND.greenD, marginTop: 2 }}>
+                      {lowPeerCount} <span style={{ fontSize: 11, fontWeight: 600, color: BRAND.muted }}>plantas</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: BRAND.dim, marginTop: 2 }}>
+                      Plantas por debajo del 85% de sus vecinas hoy
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '10px 12px', borderRadius: 8, background: BRAND.surface, border: `1px solid ${BRAND.border}` }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.muted, textTransform: 'uppercase' }}>
+                      Energía No Capturada Est.
+                    </span>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: totalLostKwh > 0 ? BRAND.red : BRAND.text, marginTop: 2 }}>
+                      {fmt(totalLostKwh, 1)} <span style={{ fontSize: 11, fontWeight: 600, color: BRAND.muted }}>kWh/día</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: BRAND.dim, marginTop: 2 }}>
+                      Brecha respecto al esperado físico P50 ({(HSP * EFF).toFixed(1)} kWh/kWp)
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '10px 12px', borderRadius: 8, background: BRAND.surface, border: `1px solid ${BRAND.border}` }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.muted, textTransform: 'uppercase' }}>
+                      Impacto Económico (Tarifa Celsia)
+                    </span>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: totalLostCop > 0 ? BRAND.red : BRAND.greenD, marginTop: 2 }}>
+                      ${Math.round(totalLostCop).toLocaleString('es-CO')} <span style={{ fontSize: 11, fontWeight: 600, color: BRAND.muted }}>COP/día</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: BRAND.dim, marginTop: 2 }}>
+                      Valorado a Costo Unitario Celsia ($964.13/kWh)
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabla compacta de resultados del motor estadístico */}
+                <div style={{ overflowX: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: 8 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: BRAND.surface, borderBottom: `1px solid ${BRAND.border}` }}>
+                        {['Planta', 'Gen. (kWh/día)', 'Esp. P50', 'Yf (kWh/kWp)', 'Ratio vs Pares', 'Z-Score MAD', 'EWMA (Soiling)', 'Pérdida COP/día', 'Diagnóstico Estadístico'].map(col => (
+                          <th key={col} style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: BRAND.muted, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {evals.map(ev => {
+                        const peerPct = ev.ratio_pares != null ? Math.round(ev.ratio_pares * 100) : null;
+                        const peerColor = peerPct == null ? BRAND.dim : peerPct < 75 ? BRAND.red : peerPct < 88 ? BRAND.gold : BRAND.green;
+                        const zVal = ev.z_score_robusto;
+                        const zColor = zVal == null ? BRAND.dim : zVal < -2.2 ? BRAND.red : zVal < -1.5 ? '#92400E' : BRAND.greenD;
+                        return (
+                          <tr key={ev.plant_code} style={{ borderBottom: `1px solid ${BRAND.border}` }}>
+                            <td style={{ padding: '7px 10px', fontWeight: 700, color: BRAND.text }}>{ev.plant_name}</td>
+                            <td style={{ padding: '7px 10px', fontWeight: 600 }}>{fmt(ev.gen_kwh, 1)}</td>
+                            <td style={{ padding: '7px 10px', color: BRAND.muted }}>{ev.expected_kwh > 0 ? fmt(ev.expected_kwh, 1) : '—'}</td>
+                            <td style={{ padding: '7px 10px', fontWeight: 700 }}>{ev.yf_kwh_kwp != null ? fmt(ev.yf_kwh_kwp, 2) : '—'}</td>
+                            <td style={{ padding: '7px 10px', minWidth: 110 }}>
+                              {peerPct != null ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <div style={{ width: 48, height: 5, borderRadius: 3, background: BRAND.surface, overflow: 'hidden' }}>
+                                    <div style={{ width: `${Math.min(100, peerPct)}%`, height: '100%', background: peerColor }} />
+                                  </div>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: peerColor }}>{peerPct}%</span>
+                                </div>
+                              ) : '—'}
+                            </td>
+                            <td style={{ padding: '7px 10px', fontWeight: 700, color: zColor }}>
+                              {zVal != null ? `${zVal > 0 ? '+' : ''}${zVal.toFixed(2)}σ` : '—'}
+                            </td>
+                            <td style={{ padding: '7px 10px', color: BRAND.muted }}>
+                              {ev.ewma_residuo != null ? `${Math.round(ev.ewma_residuo * 100)}%` : '—'}
+                            </td>
+                            <td style={{ padding: '7px 10px', fontWeight: 700, color: ev.cop_perdidos > 0 ? BRAND.red : BRAND.dim }}>
+                              {ev.cop_perdidos > 0 ? `-$${Math.round(ev.cop_perdidos).toLocaleString('es-CO')}` : '$0'}
+                            </td>
+                            <td style={{ padding: '7px 10px' }}>
+                              {ev.anomalia ? (
+                                <div>
+                                  <span style={{
+                                    display: 'inline-block', padding: '2px 7px', borderRadius: 99, fontSize: 10.5, fontWeight: 700,
+                                    background: ev.anomalia.severidad === 'critica' ? BRAND.redL : '#FEF9C3',
+                                    color: ev.anomalia.severidad === 'critica' ? '#991B1B' : '#92400E',
+                                  }}>
+                                    ⚡ {ev.anomalia.tipo.replace(/_/g, ' ').toUpperCase()}
+                                  </span>
+                                  <div style={{ fontSize: 10, color: BRAND.muted, marginTop: 2 }}>
+                                    {ev.anomalia.recomendacion}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span style={{ fontSize: 11, fontWeight: 600, color: BRAND.greenD }}>✓ Producción en rango normal</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* ── Tabla de salud por planta ───────────────────────────── */}

@@ -10,22 +10,24 @@ import AlertsPage from './pages/AlertsPage';
 import ComparePage from './pages/ComparePage';
 import MaintenancePage from './pages/MaintenancePage';
 import LandingPage from './pages/LandingPage';
+import LoginPage from './pages/LoginPage';
 import MarketPage from './pages/MarketPage';
 import InvoicePage from './pages/InvoicePage';
-import ClientPortalPage from './pages/ClientPortalPage';
 
 // Persist "already entered" for the current browser session
 const SESSION_KEY = 'cie_started';
 
 function AppRoutes() {
-  const { user } = useAuth();
-  const isClient = user.rol === 'cliente';
+  const { isAuthenticated } = useAuth();
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
-        <Route index element={isClient ? <ClientPortalPage /> : <Dashboard />} />
-        <Route path="portal-cliente" element={<ClientPortalPage />} />
+        <Route index element={<Dashboard />} />
         <Route path="plantas" element={<Plants />} />
         <Route path="plantas/:plantCode" element={<PlantDetail />} />
         <Route path="mapa" element={<MapPage />} />
@@ -34,7 +36,7 @@ function AppRoutes() {
         <Route path="mantenimiento" element={<MaintenancePage />} />
         <Route path="mercado" element={<MarketPage />} />
         <Route path="facturacion" element={<InvoicePage />} />
-        <Route path="*" element={isClient ? <ClientPortalPage /> : <Dashboard />} />
+        <Route path="*" element={<Dashboard />} />
       </Route>
     </Routes>
   );

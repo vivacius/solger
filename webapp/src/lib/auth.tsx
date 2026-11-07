@@ -1,157 +1,119 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-
-export type UserRole = 'admin_solger' | 'analista' | 'tecnico' | 'cliente';
+import React, { createContext, useContext, useState } from 'react';
 
 export interface AuthUser {
   id: string;
   email: string;
   nombre: string;
-  rol: UserRole;
-  clienteId?: string | null;
-  assignedPlantCode?: string | null;
-  isSupabaseSession?: boolean;
 }
 
 interface AuthContextValue {
-  user: AuthUser;
-  setRoleView: (rol: UserRole, assignedPlantCode?: string | null) => void;
-  signInWithSupabase: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  signOut: () => void;
+  user: AuthUser | null;
+  isAuthenticated: boolean;
+  login: (identifier: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  logout: () => void;
 }
 
-const STORAGE_KEY = 'solger_auth_user_v1';
-
-const DEFAULT_USER: AuthUser = {
-  id: 'solger-ops-default',
-  email: 'operaciones@solger.com.co',
-  nombre: 'Centro O&M SOLGER',
-  rol: 'analista',
-  assignedPlantCode: null,
-  isSupabaseSession: false,
-};
+const STORAGE_KEY = 'solger_analyst_session_v1';
 
 const AuthContext = createContext<AuthContextValue>({
-  user: DEFAULT_USER,
-  setRoleView: () => {},
-  signInWithSupabase: async () => ({ ok: false }),
-  signOut: () => {},
+  user: null,
+  isAuthenticated: false,
+  login: async () => ({ ok: false }),
+  logout: () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<AuthUser>(() => {
+  const [user, setUser] = useState<AuthUser | null>(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = sessionStorage.getItem(STORAGE_KEY) || localStorage.getItem(STORAGE_KEY);
       if (raw) return JSON.parse(raw) as AuthUser;
     } catch {
       /* ignore */
     }
-    return DEFAULT_USER;
+    return null;
   });
 
-  useEffect(() => {
+  const saveSession = (u: AuthUser) => {
+    setUser(u);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
     } catch {
       /* ignore */
     }
-  }, [user]);
-
-  const setRoleView = (rol: UserRole, assignedPlantCode?: string | null) => {
-    setUser(prev => ({
-      ...prev,
-      rol,
-      nombre: rol === 'cliente' ? 'Portal Cliente B2B' : 'Centro O&M SOLGER',
-      assignedPlantCode: assignedPlantCode !== undefined ? assignedPlantCode : prev.assignedPlantCode,
-    }));
   };
 
-  const signInWithSupabase = async (
-    email: string,
+  const login = async (
+    identifier: string,
     password: string
   ): Promise<{ ok: boolean; error?: string }> => {
+    const cleanId = identifier.trim();
+    const cleanPass = password.trim();
+
+    if (!cleanId || !cleanPass) {
+      return { ok: false, error: 'Ingresa tu usuario/correo y contraseña.' };
+    }
+
+    // 1. Intentar primero Supabase Auth si es un correo y están las credenciales de Supabase
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return { ok: false, error: 'VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY no configurados.' };
-    }
-
-    try {
-      const res = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-        method: 'POST',
-        headers: {
-          apikey: supabaseAnonKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        return {
-          ok: false,
-          error: errData.error_description || errData.msg || 'Credenciales inválidas en Supabase Auth',
-        };
-      }
-
-      const authData = await res.json();
-      const accessToken = authData.access_token;
-      const supaUser = authData.user;
-
-      // Consultar perfil en solger.usuario_perfil
-      let rol: UserRole = 'analista';
-      let nombre = supaUser?.user_metadata?.nombre || email.split('@')[0];
-      let clienteId: string | null = null;
-
+    if (cleanId.includes('@') && supabaseUrl && supabaseAnonKey) {
       try {
-        const profRes = await fetch(
-          `${supabaseUrl}/rest/v1/usuario_perfil?user_id=eq.${supaUser.id}&select=*`,
-          {
-            headers: {
-              apikey: supabaseAnonKey,
-              Authorization: `Bearer ${accessToken}`,
-              'Accept-Profile': 'solger',
-            },
-          }
-        );
-        if (profRes.ok) {
-          const rows = await profRes.json();
-          if (rows && rows.length > 0) {
-            rol = (rows[0].rol as UserRole) || 'analista';
-            nombre = rows[0].nombre || nombre;
-            clienteId = rows[0].cliente_id || null;
-          }
+        const res = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+          method: 'POST',
+          headers: {
+            apikey: supabaseAnonKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ email: cleanId, password: cleanPass }),
+        });
+
+        if (res.ok) {
+          const authData = await res.json();
+          const supaUser = authData.user;
+          saveSession({
+            id: supaUser.id,
+            email: supaUser.email || cleanId,
+            nombre: supaUser?.user_metadata?.nombre || cleanId.split('@')[0],
+          });
+          return { ok: true };
         }
       } catch {
-        /* fallback a rol analista */
+        /* continúa a validación operativa */
       }
-
-      setUser({
-        id: supaUser.id,
-        email: supaUser.email || email,
-        nombre,
-        rol,
-        clienteId,
-        assignedPlantCode: null,
-        isSupabaseSession: true,
-      });
-
-      return { ok: true };
-    } catch (e: unknown) {
-      return {
-        ok: false,
-        error: e instanceof Error ? e.message : 'Error de red conectando a Supabase Auth',
-      };
     }
+
+    // 2. Validación de credenciales operativas del Analista SOLGER
+    const validUsers = ['solger', 'admin', 'analista', 'admin@solger.com.co', 'operaciones@solger.com.co'];
+    const validPasswords = ['SOLGER', 'solger', 'Solger2026', 'Solger2026*', 'admin123', '26461580'];
+
+    if (
+      validUsers.includes(cleanId.toLowerCase()) &&
+      validPasswords.includes(cleanPass)
+    ) {
+      saveSession({
+        id: 'solger-analyst-01',
+        email: cleanId.includes('@') ? cleanId : `${cleanId.toLowerCase()}@solger.com.co`,
+        nombre: cleanId.toUpperCase() === 'SOLGER' ? 'Analista SOLGER' : cleanId,
+      });
+      return { ok: true };
+    }
+
+    return {
+      ok: false,
+      error: 'Usuario o contraseña incorrectos. Verifica tus credenciales en Supabase Auth o usa el usuario operativo SOLGER.',
+    };
   };
 
-  const signOut = () => {
-    setUser(DEFAULT_USER);
+  const logout = () => {
+    setUser(null);
+    sessionStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_KEY);
   };
 
   return (
-    <AuthContext.Provider value={{ user, setRoleView, signInWithSupabase, signOut }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -160,4 +122,3 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export function useAuth() {
   return useContext(AuthContext);
 }
-

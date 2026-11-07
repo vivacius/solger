@@ -1,1 +1,36 @@
-[]
+[
+  {
+    "id": "a015d47a-96b8-4650-8d5c-6611d0eef0c0",
+    "created_at": "2026-11-07T16:09:37.894015",
+    "company": "Celsia",
+    "plant_code": "NE=33795881",
+    "plant_name": "HDA LA CRUZ POZO 3",
+    "period": "2026-10",
+    "period_start": "2026-09-24",
+    "period_end": "2026-10-26",
+    "days_billed": 33,
+    "account_code": "3731460000",
+    "invoice_number": "CCTT18997259",
+    "meter_number": "3000031912",
+    "kwh_billed": 455.0,
+    "price_cop_kwh": 964.13,
+    "total_cop": 438679.15,
+    "componentes_cu": {
+      "G_generacion": 422.6,
+      "C_comercializacion": 147.06,
+      "T_transmision": 43.83,
+      "D_distribucion": 268.96,
+      "PR_perdidas": 75.09,
+      "R_restricciones": 6.59,
+      "otros": 0.0,
+      "cu_calculado": 964.13,
+      "tarifa_excedente_t1_agpe": 817.07
+    },
+    "notes": "Ciclo Celsia: 2026-09-24 a 2026-10-26 (33 días) · Cuenta 3731460000 · Medidor 3000031912",
+    "fusion_kwh": null,
+    "difference_kwh": null,
+    "difference_cop": null,
+    "status": "pending",
+    "verified_at": null
+  }
+]
