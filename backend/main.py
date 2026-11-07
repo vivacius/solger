@@ -14,7 +14,11 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+import os
+import sys
+import threading
 
 from config import settings
 from fusionsolar import APIError, AuthenticationError, BOGOTA_TZ, fusion_client
@@ -661,4 +665,169 @@ def create_maintenance_order(body: WorkOrderCreate) -> dict[str, Any]:
             detail="No se pudo registrar la orden en Supabase (verificar schema solger).",
         )
     return {"success": True, "order": created}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Reportes Ejecutivos e Individuales (Analytics + Telegram)
+# ══════════════════════════════════════════════════════════════════════════════
+
+ANALYTICS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../analytics"))
+ANALYTICS_PROCESSED_DIR = os.path.join(ANALYTICS_DIR, "data", "processed")
+ANALYTICS_PLANTS_DIR = os.path.join(ANALYTICS_PROCESSED_DIR, "plants")
+
+
+def _load_report_generator():
+    if ANALYTICS_DIR not in sys.path:
+        sys.path.insert(0, ANALYTICS_DIR)
+    import report_generator as rg
+    return rg
+
+
+class ReportGenerateRequest(BaseModel):
+    send_telegram: bool = True
+    send_email: bool = False
+    target_email: str | None = None
+    only_plant_code: str | None = None
+
+
+@app.get("/api/reports/list", tags=["Reportes Automatizados"])
+def list_generated_reports() -> dict[str, Any]:
+    """Lista los reportes HTML ejecutivos e individuales disponibles en analytics/data/processed."""
+    os.makedirs(ANALYTICS_PROCESSED_DIR, exist_ok=True)
+    os.makedirs(ANALYTICS_PLANTS_DIR, exist_ok=True)
+
+    # Buscar el reporte ejecutivo más reciente
+    exec_files = sorted(
+        [
+            f for f in os.listdir(ANALYTICS_PROCESSED_DIR)
+            if f.startswith("reporte_ejecutivo_") and f.endswith(".html")
+        ],
+        reverse=True,
+    )
+    latest_exec = exec_files[0] if exec_files else None
+    latest_exec_mtime = None
+    if latest_exec:
+        p = os.path.join(ANALYTICS_PROCESSED_DIR, latest_exec)
+        latest_exec_mtime = datetime.fromtimestamp(os.path.getmtime(p), tz=BOGOTA_TZ).isoformat()
+
+    plant_reports = []
+    for fname in sorted(os.listdir(ANALYTICS_PLANTS_DIR)):
+        if fname.endswith(".html"):
+            fpath = os.path.join(ANALYTICS_PLANTS_DIR, fname)
+            safe_name = fname[:-5]
+            plant_reports.append({
+                "safeName": safe_name,
+                "displayName": safe_name.replace("_", " "),
+                "fileName": fname,
+                "updatedAt": datetime.fromtimestamp(os.path.getmtime(fpath), tz=BOGOTA_TZ).isoformat(),
+                "sizeBytes": os.path.getsize(fpath),
+            })
+
+    return {
+        "success": True,
+        "executiveReport": {
+            "available": latest_exec is not None,
+            "fileName": latest_exec,
+            "updatedAt": latest_exec_mtime,
+        },
+        "plantReports": plant_reports,
+        "automation": {
+            "telegramConfigured": True,
+            "telegramChatId": os.getenv("TELEGRAM_CHAT_ID", "5475150163"),
+            "dailySchedule": "18:00 COT (Diario — GitHub Actions & Scheduler Activo)",
+            "workflowFile": ".github/workflows/daily_telegram_report.yml",
+        },
+    }
+
+
+@app.get("/api/reports/preview/executive", response_class=HTMLResponse, tags=["Reportes Automatizados"])
+def preview_executive_report() -> HTMLResponse:
+    """Devuelve el HTML del reporte ejecutivo más reciente para previsualización o descarga."""
+    os.makedirs(ANALYTICS_PROCESSED_DIR, exist_ok=True)
+    latest_path = os.path.join(ANALYTICS_PROCESSED_DIR, "reporte_ejecutivo_latest.html")
+    if not os.path.exists(latest_path):
+        exec_files = sorted(
+            [
+                f for f in os.listdir(ANALYTICS_PROCESSED_DIR)
+                if f.startswith("reporte_ejecutivo_") and f.endswith(".html")
+            ],
+            reverse=True,
+        )
+        if exec_files:
+            latest_path = os.path.join(ANALYTICS_PROCESSED_DIR, exec_files[0])
+        else:
+            raise HTTPException(status_code=404, detail="Aún no hay reporte ejecutivo generado.")
+    with open(latest_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@app.get("/api/reports/preview/plant/{safe_name}", response_class=HTMLResponse, tags=["Reportes Automatizados"])
+def preview_plant_report(safe_name: str) -> HTMLResponse:
+    """Devuelve el HTML del reporte individual de una planta."""
+    clean = os.path.basename(safe_name).replace(".html", "")
+    fpath = os.path.join(ANALYTICS_PLANTS_DIR, f"{clean}.html")
+    if not os.path.exists(fpath):
+        raise HTTPException(status_code=404, detail=f"Reporte de planta '{clean}' no encontrado.")
+    with open(fpath, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@app.post("/api/reports/generate", tags=["Reportes Automatizados"])
+def generate_and_send_reports(body: ReportGenerateRequest) -> dict[str, Any]:
+    """
+    Regenera el Reporte Ejecutivo de Cierre y los reportes individuales por planta
+    usando `analytics/report_generator.py`, y opcionalmente los envía por Telegram.
+    """
+    rg = _load_report_generator()
+    summary_data = get_plants_summary()
+    alerts_data = get_alerts()
+
+    def _in_process_series_fetcher(pcode: str):
+        day_d, month_d = [], []
+        try:
+            day_d = get_plant_kpi_day(pcode).get("data", [])
+        except Exception:
+            pass
+        try:
+            month_d = get_plant_kpi_month(pcode).get("data", [])
+        except Exception:
+            pass
+        return day_d, month_d
+
+    result = rg.run_report_pipeline(
+        data=summary_data,
+        alarms_data=alerts_data,
+        series_fetcher=_in_process_series_fetcher,
+        send_email=body.send_email,
+        send_telegram=body.send_telegram,
+        target_email=body.target_email,
+        only_plant_code=body.only_plant_code,
+    )
+    return result
+
+
+# ─── Scheduler Diario en Background (18:00 Hora Colombia) ────────────────────
+_LAST_SCHEDULED_REPORT_DATE: str | None = None
+
+
+def _daily_telegram_report_worker():
+    global _LAST_SCHEDULED_REPORT_DATE
+    while True:
+        try:
+            now_cot = datetime.now(BOGOTA_TZ)
+            today_str = now_cot.strftime("%Y-%m-%d")
+            if now_cot.hour == 18 and now_cot.minute == 0 and _LAST_SCHEDULED_REPORT_DATE != today_str:
+                _LAST_SCHEDULED_REPORT_DATE = today_str
+                logger.info("Ejecutando envío automático diario (18:00 COT) a Telegram...")
+                generate_and_send_reports(ReportGenerateRequest(send_telegram=True, send_email=False))
+        except Exception as exc:
+            logger.warning("Error en scheduler diario de reportes: %s", exc)
+        time.sleep(30)
+
+
+@app.on_event("startup")
+def _start_report_scheduler():
+    t = threading.Thread(target=_daily_telegram_report_worker, daemon=True)
+    t.start()
+
 
