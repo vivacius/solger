@@ -129,7 +129,7 @@ export default function InvoicePage() {
             Auditoría y Conciliación de Facturas (Celsia / CREG 174)
           </h1>
           <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
-            Extrae automáticamente los datos del recibo PDF de Celsia y crúzalos contra el ciclo exacto en Supabase (<code>solger.kpi_diario</code>) y FusionSolar
+            Extrae automáticamente los datos del recibo PDF de Celsia y crúzalos contra el ciclo exacto de generación e inyección de la planta
           </p>
         </div>
         <button
@@ -251,7 +251,7 @@ export default function InvoicePage() {
                         }}
                       >
                         <RefreshCw size={11} style={{ animation: verifying === inv.id ? 'spin-slow 1s linear infinite' : 'none' }} />
-                        {inv.status === 'pending' ? 'Verificar vs Supabase / FusionSolar' : 'Re-verificar Ciclo'}
+                        {inv.status === 'pending' ? 'Verificar contra Telemetría' : 'Re-verificar Ciclo'}
                       </button>
                       <button
                         onClick={() => handleDelete(inv.id)}
@@ -790,7 +790,7 @@ function NewInvoiceModal({ plants, onClose, onCreated }: {
               background: BRAND.green, color: '#fff', border: 'none', cursor: 'pointer',
               opacity: saving ? 0.7 : 1,
             }}>
-              {saving ? 'Guardando en Supabase…' : 'Guardar Factura y Conciliar'}
+              {saving ? 'Guardando…' : 'Guardar Factura y Conciliar'}
             </button>
           </div>
         </form>

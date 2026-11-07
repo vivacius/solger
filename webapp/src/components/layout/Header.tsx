@@ -1,5 +1,5 @@
 import { useLocation, NavLink, Link } from 'react-router-dom';
-import { RefreshCw, Bell, MapPin, Calendar, ArrowLeft, LogOut, UserCheck } from 'lucide-react';
+import { RefreshCw, Bell, MapPin, Calendar, ArrowLeft, LogOut } from 'lucide-react';
 import { BRAND } from '../../lib/utils';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
@@ -166,27 +166,6 @@ export function Header({ lastUpdated, onRefresh, loading }: HeaderProps) {
 
       {/* ── Derecha: Sincronización y Métricas — oculto en móvil ── */}
       <div className="header-widgets-desktop" style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-        {/* Usuario Autenticado */}
-        {user && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '3px 8px',
-              borderRadius: 6,
-              background: BRAND.greenL,
-              border: '1px solid rgba(88,174,50,0.2)',
-              color: BRAND.greenD,
-              fontSize: 11,
-              fontWeight: 700,
-            }}
-          >
-            <UserCheck size={11} />
-            <span>{user.nombre}</span>
-          </div>
-        )}
-
         {/* Ubicación */}
         <div
           style={{

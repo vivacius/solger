@@ -277,7 +277,7 @@ export default function MaintenancePage() {
           ))}
         </div>
 
-        {/* ── PANEL DE DIAGNÓSTICO ESTADÍSTICO DE ANOMALÍAS (4 CAPAS — SUPABASE) ─── */}
+        {/* ── PANEL DE DIAGNÓSTICO ESTADÍSTICO DE ANOMALÍAS (4 CAPAS) ─── */}
         <div style={{ ...SC, borderTop: `3px solid ${BRAND.teal}` }}>
           <div style={{
             padding: '10px 16px',
@@ -293,7 +293,7 @@ export default function MaintenancePage() {
               <Activity size={15} color={BRAND.teal} />
               <div>
                 <p className="section-title" style={{ fontSize: 13.5, margin: 0 }}>
-                  Motor Estadístico de Detección de Anomalías (4 Capas · Supabase <code>solger.kpi_diario</code>)
+                  Diagnóstico Estadístico de Rendimiento y Anomalías (4 Capas)
                 </p>
                 <p style={{ fontSize: 11, color: BRAND.muted, margin: 0 }}>
                   Evalúa cada planta sin piranómetro cruzando: (1) Reglas duras, (2) Esperado físico P50, (3) Ratio vs. plantas vecinas del Valle y (4) Z-Score robusto MAD + EWMA (Soiling)
@@ -747,7 +747,7 @@ export default function MaintenancePage() {
           }}>
             <Info size={13} />
             <span>
-              <strong>* Capacidad estimada por histórico (P90):</strong> Para plantas con capacidad nominal en 0 en FusionSolar, se utiliza su capacidad estimada desde la serie histórica en <code>solger.planta</code>, habilitando el cálculo de índice de desempeño, kWh/kWp y detección de anomalías contra plantas vecinas.
+              <strong>* Capacidad estimada por histórico (P90):</strong> Para plantas con capacidad nominal en 0 en telemetría, se utiliza su capacidad estimada desde la serie histórica de generación, habilitando el cálculo de índice de desempeño, kWh/kWp y detección de anomalías contra plantas vecinas.
             </span>
           </div>
         )}

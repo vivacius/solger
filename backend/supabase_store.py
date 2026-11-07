@@ -415,17 +415,18 @@ def get_monthly_kpi_from_supabase(plant_code: str, month_ym: str | None = None) 
     if not planta_id:
         return []
     try:
+        import calendar
         base = f"{settings.SUPABASE_URL}/rest/v1"
         url = f"{base}/kpi_diario?planta_id=eq.{planta_id}&select=fecha,gen_kwh,export_kwh,import_kwh,autoconsumo_kwh&order=fecha.asc&limit=45"
         if month_ym and len(month_ym) == 6:
-            ym_dash = f"{month_ym[:4]}-{month_ym[4:6]}"
-            url += f"&fecha=gte.{ym_dash}-01&fecha=lte.{ym_dash}-31"
+            year_i, month_i = int(month_ym[:4]), int(month_ym[4:6])
+            last_day = calendar.monthrange(year_i, month_i)[1]
+            ym_dash = f"{year_i:04d}-{month_i:02d}"
+            url += f"&fecha=gte.{ym_dash}-01&fecha=lte.{ym_dash}-{last_day:02d}"
         r = requests.get(url, headers=_headers(), timeout=10)
-        if r.status_code != 200:
-            return []
-        rows = r.json()
+        rows = r.json() if r.status_code == 200 else []
         # Si el mes actual apenas empieza y tiene pocos días en BD, traer los últimos 30 días
-        if len(rows) < 5 and month_ym:
+        if len(rows) < 10:
             r2 = requests.get(
                 f"{base}/kpi_diario?planta_id=eq.{planta_id}&select=fecha,gen_kwh,export_kwh,import_kwh,autoconsumo_kwh&order=fecha.desc&limit=30",
                 headers=_headers(),

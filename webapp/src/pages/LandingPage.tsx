@@ -1,20 +1,42 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAuth } from '../lib/auth';
 import './LandingPage.css';
 
 interface LandingPageProps {
-  onStart: () => void;
+  onStart?: () => void;
 }
 
 export default function LandingPage({ onStart }: LandingPageProps) {
+  const { login } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [animateIn, setAnimateIn] = useState(false);
 
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
-    // Trigger entrance animation shortly after mount
     const t = setTimeout(() => setAnimateIn(true), 100);
     return () => clearTimeout(t);
   }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await login(identifier, password);
+      if (res.ok) {
+        onStart?.();
+      } else {
+        setError(res.error || 'Usuario o contraseña incorrectos');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="landing-root">
@@ -31,7 +53,7 @@ export default function LandingPage({ onStart }: LandingPageProps) {
           onCanPlay={() => {
             setVideoLoaded(true);
             if (videoRef.current) {
-              videoRef.current.playbackRate = 0.85; // mitad de velocidad
+              videoRef.current.playbackRate = 0.85;
             }
           }}
         />
@@ -41,7 +63,6 @@ export default function LandingPage({ onStart }: LandingPageProps) {
 
       {/* ── Content ──────────────────────────────────────── */}
       <div className={`landing-content ${animateIn ? 'animate-in' : ''}`}>
-
         {/* Logo */}
         <div className="landing-logos">
           <img
@@ -61,15 +82,41 @@ export default function LandingPage({ onStart }: LandingPageProps) {
         {/* Title */}
         <h1 className="landing-h1">Centro de Inteligencia Energética</h1>
 
-        {/* CTA Button */}
-        <button
-          id="landing-start-btn"
-          className="landing-cta"
-          onClick={onStart}
-        >
-          <span className="landing-cta-text">Iniciar plataforma</span>
-          <span className="landing-cta-arrow">→</span>
-        </button>
+        {/* Formulario integrado en la tarjeta de vidrio original */}
+        <form onSubmit={handleSubmit} className="landing-form">
+          <input
+            type="text"
+            className="landing-input"
+            placeholder="Usuario o correo electrónico"
+            value={identifier}
+            onChange={e => setIdentifier(e.target.value)}
+            autoComplete="username"
+            required
+          />
+          <input
+            type="password"
+            className="landing-input"
+            placeholder="Contraseña"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            autoComplete="current-password"
+            required
+          />
+
+          {error && <div className="landing-error">{error}</div>}
+
+          <button
+            id="landing-start-btn"
+            type="submit"
+            disabled={loading}
+            className="landing-cta"
+          >
+            <span className="landing-cta-text">
+              {loading ? 'Ingresando…' : 'Iniciar plataforma'}
+            </span>
+            <span className="landing-cta-arrow">→</span>
+          </button>
+        </form>
       </div>
     </div>
   );
