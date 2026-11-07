@@ -334,3 +334,67 @@ def create_work_order(data: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def sync_invoice_to_supabase(invoice: dict[str, Any]) -> None:
+    """
+    Sincroniza un recibo creado o verificado hacia `solger.recibo` y `solger.conciliacion`.
+    Usa las columnas estándar de la migración 001 para garantizar compatibilidad inmediata.
+    """
+    if not is_configured():
+        return
+    uuid_map = _ensure_plant_uuids()
+    plant_code = invoice.get("plant_code", "")
+    planta_id = uuid_map.get(plant_code)
+    if not planta_id:
+        return
+
+    period = str(invoice.get("period") or "2026-10")
+    p_start = invoice.get("period_start") or f"{period}-01"
+    p_end = invoice.get("period_end") or f"{period}-28"
+
+    recibo_payload = {
+        "id": invoice["id"],
+        "planta_id": planta_id,
+        "comercializador": invoice.get("company", "Celsia"),
+        "periodo_inicio": p_start,
+        "periodo_fin": p_end,
+        "kwh_exportados_facturados": float(invoice.get("kwh_billed") or 0),
+        "tarifa_cu_aplicada": float(invoice.get("price_cop_kwh") or 0),
+        "total_factura_cop": float(invoice.get("total_cop") or 0),
+        "estado_extraccion": "verificado" if invoice.get("status") in ("ok", "discrepancy", "critical") else "pendiente",
+    }
+    try:
+        base = f"{settings.SUPABASE_URL}/rest/v1"
+        r = requests.post(
+            f"{base}/recibo?on_conflict=id",
+            headers=_headers(),
+            json=recibo_payload,
+            timeout=12,
+        )
+        if r.status_code in (200, 201) and invoice.get("fusion_kwh") is not None:
+            fusion_kwh = float(invoice.get("fusion_kwh") or 0)
+            billed_kwh = float(invoice.get("kwh_billed") or 0)
+            diff_kwh = float(invoice.get("difference_kwh") or 0)
+            diff_pct = round(abs(diff_kwh / fusion_kwh * 100), 2) if fusion_kwh > 0 else 0.0
+            concil_payload = {
+                "recibo_id": invoice["id"],
+                "planta_id": planta_id,
+                "kwh_generados_fs": float(invoice.get("gen_kwh") or fusion_kwh),
+                "kwh_exportados_fs": float(invoice.get("export_kwh") or fusion_kwh),
+                "kwh_importados_fs": float(invoice.get("import_kwh") or 0),
+                "diferencia_export_kwh": diff_kwh,
+                "diferencia_export_pct": diff_pct,
+                "diferencia_cop": float(invoice.get("difference_cop") or 0),
+                "estado": invoice.get("status", "ok"),
+                "notas": invoice.get("notes") or f"Cuenta {invoice.get('account_number', '')} Factura {invoice.get('invoice_number', '')}".strip(),
+            }
+            requests.post(
+                f"{base}/conciliacion?on_conflict=recibo_id",
+                headers=_headers(),
+                json=concil_payload,
+                timeout=12,
+            )
+    except Exception as exc:
+        logger.debug("Sincronización de recibo con Supabase omitida: %s", exc)
+
+
+

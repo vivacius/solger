@@ -88,6 +88,11 @@ def create_invoice(data: dict[str, Any]) -> dict:
     }
     invoices.append(invoice)
     _write_all(invoices)
+    try:
+        from supabase_store import sync_invoice_to_supabase
+        sync_invoice_to_supabase(invoice)
+    except Exception:
+        pass
     logger.info(f"Factura creada: {invoice['id']} — {data.get('company')} {data.get('period')}")
     return invoice
 
@@ -132,6 +137,11 @@ def update_verification(
                 "verified_at": datetime.now().isoformat(),
             })
             _write_all(invoices)
+            try:
+                from supabase_store import sync_invoice_to_supabase
+                sync_invoice_to_supabase(inv)
+            except Exception:
+                pass
             return inv
     return None
 
