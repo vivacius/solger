@@ -123,3 +123,4 @@ def estimate_capacity_from_history(
         "sample_days": len(valid),
         "method": "p90_daily_yield",
     }
+

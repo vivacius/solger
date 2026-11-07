@@ -43,10 +43,18 @@ class Settings:
         os.getenv("CO2_FACTOR_T_PER_MWH", "0.220")
     )
 
-    # Supabase (schema: solger)
-    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
-    SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
-    SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    # Supabase (schema: solger) — soporta prefijo SUPABASE_ y VITE_SUPABASE_
+    SUPABASE_URL: str = (
+        os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or ""
+    ).rstrip("/")
+    SUPABASE_ANON_KEY: str = (
+        os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY") or ""
+    )
+    SUPABASE_SERVICE_ROLE_KEY: str = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("VITE_SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    )
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     DB_SCHEMA: str = os.getenv("DB_SCHEMA", "solger")
 

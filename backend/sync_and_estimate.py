@@ -240,3 +240,4 @@ if __name__ == "__main__":
     parser.add_argument("--months", type=int, default=4, help="Número de meses hacia atrás a consultar")
     args = parser.parse_args()
     run_backfill_and_estimate(args.months)
+
