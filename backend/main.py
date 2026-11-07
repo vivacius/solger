@@ -28,6 +28,7 @@ import invoice_store
 import supabase_store
 import celsia_parser
 import anomalies as anomaly_engine
+import satellite_irradiance
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -129,6 +130,11 @@ def get_portfolio_summary() -> dict[str, Any]:
                 active_plants += 1
 
         co2_avoided = kpi_domain.calc_co2_tons(energy_total)
+        sat_valle = satellite_irradiance.get_satellite_irradiance()
+        for p in plants:
+            psat = satellite_irradiance.get_satellite_irradiance(p.get("latitude"), p.get("longitude"))
+            p["satelliteGhi_kWh_m2"] = psat["ghi_today_kwh_m2"]
+            p["cloudCover_pct"] = psat["cloud_cover_pct"]
 
         return {
             "success": True,
@@ -141,6 +147,9 @@ def get_portfolio_summary() -> dict[str, Any]:
                 "totalEnergyMonth_kWh": round(energy_month, 2),
                 "totalEnergyTotal_kWh": round(energy_total, 2),
                 "co2Avoided_ton": co2_avoided,
+                "satelliteHspToday_h": sat_valle["ghi_today_kwh_m2"],
+                "satelliteIrradiance_W_m2": sat_valle["ghi_current_w_m2"],
+                "cloudCover_pct": sat_valle["cloud_cover_pct"],
             },
             "plants": plants,
             "kpis": kpi_list,
@@ -446,6 +455,10 @@ async def parse_invoice_pdf(file: UploadFile = File(...)) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Archivo PDF vacío.")
     try:
         parsed = celsia_parser.parse_celsia_pdf(pdf_bytes)
+        matched = supabase_store.find_plant_by_account_code(parsed.get("codigo_cuenta"))
+        if matched:
+            parsed["matched_plant_code"] = matched.get("plant_code")
+            parsed["matched_plant_name"] = matched.get("plant_name")
         return {"success": True, "parsed": parsed}
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"No se pudo interpretar el PDF: {exc}")
@@ -460,7 +473,9 @@ def list_invoices() -> dict[str, Any]:
 
 @app.post("/api/invoices", tags=["Facturación"])
 def create_invoice(body: InvoiceCreate) -> dict[str, Any]:
-    """Registra una nueva factura de compra/liquidación de energía."""
+    """Registra una nueva factura de compra/liquidación de energía y asocia la cuenta OR a la planta."""
+    if body.plant_code and body.account_code:
+        supabase_store.bind_account_code_to_plant(body.plant_code, body.account_code, body.meter_number)
     invoice = invoice_store.create_invoice(body.model_dump())
     return {"success": True, "invoice": invoice}
 
@@ -619,6 +634,8 @@ def get_portfolio_anomalies() -> dict[str, Any]:
             effective_day_p = day_p if day_p > 0 else round(month_p / days_elapsed, 2)
             eff_cap = float(p.get("capacity") or 0.0)
             health = int(dim.get("real_health_state") or 3)
+            psat = satellite_irradiance.get_satellite_irradiance(p.get("latitude"), p.get("longitude"))
+            ghi_sat = float(psat.get("ghi_today_kwh_m2") or kpi_domain.HSP_REF)
             observations.append(
                 anomaly_engine.PlantDayObservation(
                     plant_code=code,
@@ -626,7 +643,7 @@ def get_portfolio_anomalies() -> dict[str, Any]:
                     fecha=today_str,
                     gen_kwh=effective_day_p,
                     kwp_effective=eff_cap,
-                    ghi_sat_kwh_m2=kpi_domain.HSP_REF,
+                    ghi_sat_kwh_m2=ghi_sat,
                     pr_base=kpi_domain.PR_DESIGN,
                     health_state=health,
                     tariff_cop_kwh=964.13,  # Tarifa referencia Celsia CU Valle
@@ -692,11 +709,10 @@ class ReportGenerateRequest(BaseModel):
 
 @app.get("/api/reports/list", tags=["Reportes Automatizados"])
 def list_generated_reports() -> dict[str, Any]:
-    """Lista los reportes HTML ejecutivos e individuales disponibles en analytics/data/processed."""
+    """Lista los reportes HTML ejecutivos e individuales disponibles o generables bajo demanda."""
     os.makedirs(ANALYTICS_PROCESSED_DIR, exist_ok=True)
     os.makedirs(ANALYTICS_PLANTS_DIR, exist_ok=True)
 
-    # Buscar el reporte ejecutivo más reciente
     exec_files = sorted(
         [
             f for f in os.listdir(ANALYTICS_PROCESSED_DIR)
@@ -704,15 +720,16 @@ def list_generated_reports() -> dict[str, Any]:
         ],
         reverse=True,
     )
-    latest_exec = exec_files[0] if exec_files else None
-    latest_exec_mtime = None
-    if latest_exec:
-        p = os.path.join(ANALYTICS_PROCESSED_DIR, latest_exec)
+    latest_exec = exec_files[0] if exec_files else "reporte_ejecutivo_latest.html"
+    latest_exec_mtime = datetime.now(BOGOTA_TZ).isoformat()
+    if exec_files:
+        p = os.path.join(ANALYTICS_PROCESSED_DIR, exec_files[0])
         latest_exec_mtime = datetime.fromtimestamp(os.path.getmtime(p), tz=BOGOTA_TZ).isoformat()
 
     plant_reports = []
-    for fname in sorted(os.listdir(ANALYTICS_PLANTS_DIR)):
-        if fname.endswith(".html"):
+    disk_files = sorted(f for f in os.listdir(ANALYTICS_PLANTS_DIR) if f.endswith(".html"))
+    if disk_files:
+        for fname in disk_files:
             fpath = os.path.join(ANALYTICS_PLANTS_DIR, fname)
             safe_name = fname[:-5]
             plant_reports.append({
@@ -722,11 +739,28 @@ def list_generated_reports() -> dict[str, Any]:
                 "updatedAt": datetime.fromtimestamp(os.path.getmtime(fpath), tz=BOGOTA_TZ).isoformat(),
                 "sizeBytes": os.path.getsize(fpath),
             })
+    else:
+        # En Vercel serverless (donde analytics/data/processed se excluye para mantener el bundle <25MB),
+        # poblar la lista de plantas dinámicamente desde el catálogo
+        rg = _load_report_generator()
+        try:
+            plants = get_plants().get("plants", [])
+            for pl in plants:
+                sname = rg.get_safe_filename(pl.get("plantName", pl.get("plantCode", "Planta")))
+                plant_reports.append({
+                    "safeName": sname,
+                    "displayName": pl.get("plantName", sname),
+                    "fileName": f"{sname}.html",
+                    "updatedAt": latest_exec_mtime,
+                    "sizeBytes": 48000,
+                })
+        except Exception:
+            pass
 
     return {
         "success": True,
         "executiveReport": {
-            "available": latest_exec is not None,
+            "available": True,
             "fileName": latest_exec,
             "updatedAt": latest_exec_mtime,
         },
@@ -734,7 +768,7 @@ def list_generated_reports() -> dict[str, Any]:
         "automation": {
             "telegramConfigured": True,
             "telegramChatId": os.getenv("TELEGRAM_CHAT_ID", "5475150163"),
-            "dailySchedule": "18:00 COT (Diario — GitHub Actions & Scheduler Activo)",
+            "dailySchedule": "18:00 COT (Diario) + ETL cada 2h",
             "workflowFile": ".github/workflows/daily_telegram_report.yml",
         },
     }
@@ -742,34 +776,62 @@ def list_generated_reports() -> dict[str, Any]:
 
 @app.get("/api/reports/preview/executive", response_class=HTMLResponse, tags=["Reportes Automatizados"])
 def preview_executive_report() -> HTMLResponse:
-    """Devuelve el HTML del reporte ejecutivo más reciente para previsualización o descarga."""
+    """Devuelve el HTML del reporte ejecutivo más reciente (o lo genera en memoria si es serverless)."""
     os.makedirs(ANALYTICS_PROCESSED_DIR, exist_ok=True)
     latest_path = os.path.join(ANALYTICS_PROCESSED_DIR, "reporte_ejecutivo_latest.html")
-    if not os.path.exists(latest_path):
-        exec_files = sorted(
-            [
-                f for f in os.listdir(ANALYTICS_PROCESSED_DIR)
-                if f.startswith("reporte_ejecutivo_") and f.endswith(".html")
-            ],
-            reverse=True,
-        )
-        if exec_files:
-            latest_path = os.path.join(ANALYTICS_PROCESSED_DIR, exec_files[0])
-        else:
-            raise HTTPException(status_code=404, detail="Aún no hay reporte ejecutivo generado.")
-    with open(latest_path, "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
+    rg = _load_report_generator()
+    raw_mem = rg._safe_read_bytes(latest_path)
+    if raw_mem:
+        return HTMLResponse(content=raw_mem.decode("utf-8"))
+
+    exec_files = sorted(
+        [
+            f for f in os.listdir(ANALYTICS_PROCESSED_DIR)
+            if f.startswith("reporte_ejecutivo_") and f.endswith(".html")
+        ],
+        reverse=True,
+    )
+    if exec_files:
+        p = os.path.join(ANALYTICS_PROCESSED_DIR, exec_files[0])
+        raw_disk = rg._safe_read_bytes(p)
+        if raw_disk:
+            return HTMLResponse(content=raw_disk.decode("utf-8"))
+
+    # Generar al vuelo en memoria (entorno serverless Vercel)
+    summary_data = get_portfolio_summary()
+    alerts_data = get_alerts()
+    logo_b64 = rg.get_base64_image(rg.get_logo_path())
+    html_str = rg.build_executive_html_report(summary_data, alerts_data, logo_src=logo_b64)
+    rg._safe_write_text(latest_path, html_str)
+    return HTMLResponse(content=html_str)
 
 
 @app.get("/api/reports/preview/plant/{safe_name}", response_class=HTMLResponse, tags=["Reportes Automatizados"])
 def preview_plant_report(safe_name: str) -> HTMLResponse:
-    """Devuelve el HTML del reporte individual de una planta."""
+    """Devuelve el HTML del reporte individual de una planta (o lo genera al vuelo si es serverless)."""
     clean = os.path.basename(safe_name).replace(".html", "")
     fpath = os.path.join(ANALYTICS_PLANTS_DIR, f"{clean}.html")
-    if not os.path.exists(fpath):
+    rg = _load_report_generator()
+    raw = rg._safe_read_bytes(fpath)
+    if raw:
+        return HTMLResponse(content=raw.decode("utf-8"))
+
+    # Generar al vuelo en memoria para Vercel serverless
+    summary_data = get_portfolio_summary()
+    plants = summary_data.get("plants", [])
+    kpis = summary_data.get("kpis", [])
+    kpi_map = {(k.get("plantCode") or k.get("stationCode")): k.get("dataItemMap", {}) for k in kpis}
+    target_plant = next(
+        (p for p in plants if rg.get_safe_filename(p.get("plantName", "")) == clean),
+        plants[0] if plants else None,
+    )
+    if not target_plant:
         raise HTTPException(status_code=404, detail=f"Reporte de planta '{clean}' no encontrado.")
-    with open(fpath, "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
+    dim = kpi_map.get(target_plant.get("plantCode"), {})
+    logo_b64 = rg.get_base64_image(rg.get_logo_path())
+    html_str = rg.build_plant_html_report(target_plant, dim, logo_src=logo_b64)
+    rg._safe_write_text(fpath, html_str)
+    return HTMLResponse(content=html_str)
 
 
 @app.post("/api/reports/generate", tags=["Reportes Automatizados"])
@@ -779,7 +841,7 @@ def generate_and_send_reports(body: ReportGenerateRequest) -> dict[str, Any]:
     usando `analytics/report_generator.py`, y opcionalmente los envía por Telegram.
     """
     rg = _load_report_generator()
-    summary_data = get_plants_summary()
+    summary_data = get_portfolio_summary()
     alerts_data = get_alerts()
 
     def _in_process_series_fetcher(pcode: str):

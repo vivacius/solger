@@ -99,11 +99,18 @@ def get_logo_path() -> str:
             return c
     return "../webapp/public/logo.png"
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import numpy as np
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    import numpy as np
+    HAS_MPL = True
+except ImportError:
+    HAS_MPL = False
+    plt = None
+    mpatches = None
+    np = None
 
 load_dotenv(override=True)
 
@@ -231,7 +238,7 @@ def fetch_data_from_proxy():
         pass
     try:
         bm = _get_backend_main()
-        return bm.get_plants_summary()
+        return bm.get_portfolio_summary()
     except Exception as exc:
         print(f"  [WARN] Error consultando resumen en proceso: {exc}")
     return None
@@ -290,6 +297,8 @@ def get_safe_filename(name: str) -> str:
 
 def generate_power_chart(day_data: list, filename: str, month_data: list | None = None) -> bool:
     """Curva de potencia activa horaria (kW): Generación FV, Exportación, Autoconsumo, Importación."""
+    if not HAS_MPL:
+        return False
     buy_today = 0.0
     load_today = 0.0
     if month_data:
@@ -363,6 +372,8 @@ def generate_power_chart(day_data: list, filename: str, month_data: list | None 
 # ─── GRÁFICO 2: Balance mensual de energía (por planta) ──────────────────────
 def generate_monthly_chart(month_data: list, filename: str) -> bool:
     """Barras agrupadas: Autoconsumo + Exportación vs. Importación por día del mes."""
+    if not HAS_MPL:
+        return False
     days, self_v, exp_v, buy_v = [], [], [], []
     for item in month_data:
         ts = item.get("collectTime", 0)
@@ -411,7 +422,7 @@ def generate_portfolio_chart(plants_data: list, filename: str) -> bool:
     Barra horizontal por planta: generación real vs esperada.
     Color por estado de salud. Muestra PR% como etiqueta.
     """
-    if not plants_data:
+    if not HAS_MPL or not plants_data:
         return False
 
     fig_h = max(3.0, len(plants_data) * 0.6 + 1.2)
@@ -463,6 +474,8 @@ def generate_hsp_chart(plants_data: list, filename: str) -> bool:
     Barras de HSP real por planta (calculado desde generación/capacidad).
     Línea de referencia en 4.5 h/día. Coloreado por nivel de rendimiento.
     """
+    if not HAS_MPL:
+        return False
     data = [d for d in plants_data if d.get('capacity', 0) > 0 and d.get('day_power', 0) > 0]
     if not data:
         return False

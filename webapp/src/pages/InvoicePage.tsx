@@ -413,28 +413,34 @@ function NewInvoiceModal({ plants, onClose, onCreated }: {
         const cycleNote = p.period_start && p.period_end
           ? `Extraído de ${file.name} · Ciclo Celsia: ${p.period_start} a ${p.period_end} (${p.days_billed ?? ''} días) · Cuenta ${p.account_code ?? ''} · Factura ${p.invoice_number ?? ''} · Medidor ${p.meter_number ?? ''}`
           : '';
-        setForm(f => ({
-          ...f,
-          company: p.company || f.company,
-          period: p.period || f.period,
-          period_start: p.period_start || '',
-          period_end: p.period_end || '',
-          days_billed: p.days_billed ?? null,
-          client_name: p.client_name || '',
-          account_code: p.account_code || '',
-          invoice_number: p.invoice_number || '',
-          meter_number: p.meter_number || '',
-          reading_previous_kwh: p.reading_previous_kwh ?? null,
-          reading_current_kwh: p.reading_current_kwh ?? null,
-          multiplier: p.multiplier ?? 1,
-          subtotal_active_cop: p.subtotal_active_cop ?? null,
-          subsidy_or_contrib_cop: p.subsidy_or_contrib_cop ?? null,
-          kwh_billed: p.kwh_billed != null ? String(p.kwh_billed) : f.kwh_billed,
-          price_cop_kwh: p.price_cop_kwh != null ? String(p.price_cop_kwh) : f.price_cop_kwh,
-          componentes_cu: p.componentes_cu || null,
-          has_agpe_template: Boolean(p.has_agpe_template),
-          notes: cycleNote || f.notes,
-        }));
+        setForm(f => {
+          const matchedCode = p.matched_plant_code || f.plant_code;
+          const matchedPlantObj = plants.find(pl => pl.plantCode === matchedCode);
+          return {
+            ...f,
+            plant_code: matchedCode,
+            plant_name: matchedPlantObj?.plantName || p.matched_plant_name || f.plant_name,
+            company: p.company || f.company,
+            period: p.period || f.period,
+            period_start: p.period_start || '',
+            period_end: p.period_end || '',
+            days_billed: p.days_billed ?? null,
+            client_name: p.client_name || '',
+            account_code: p.account_code || '',
+            invoice_number: p.invoice_number || '',
+            meter_number: p.meter_number || '',
+            reading_previous_kwh: p.reading_previous_kwh ?? null,
+            reading_current_kwh: p.reading_current_kwh ?? null,
+            multiplier: p.multiplier ?? 1,
+            subtotal_active_cop: p.subtotal_active_cop ?? null,
+            subsidy_or_contrib_cop: p.subsidy_or_contrib_cop ?? null,
+            kwh_billed: p.kwh_billed != null ? String(p.kwh_billed) : f.kwh_billed,
+            price_cop_kwh: p.price_cop_kwh != null ? String(p.price_cop_kwh) : f.price_cop_kwh,
+            componentes_cu: p.componentes_cu || null,
+            has_agpe_template: Boolean(p.has_agpe_template),
+            notes: cycleNote || f.notes,
+          };
+        });
       }
     } catch (err) {
       console.error('Error leyendo PDF Celsia:', err);
