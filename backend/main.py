@@ -23,6 +23,7 @@ import market as market_svc
 import invoice_store
 import supabase_store
 import celsia_parser
+import anomalies as anomaly_engine
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -479,3 +480,96 @@ def delete_invoice(invoice_id: str) -> dict[str, Any]:
     if not deleted:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
     return {"success": True, "message": "Factura eliminada"}
+
+
+# ─── Anomalías Estadísticas y Órdenes de Trabajo (Supabase schema: solger) ────
+
+class WorkOrderCreate(BaseModel):
+    plant_code: str
+    tipo: str              # 'limpieza' | 'electrica' | 'termografia' | 'correctivo' | 'otro'
+    prioridad: str = "media"
+    estado: str = "completada"
+    titulo: str = ""
+    descripcion: str = ""
+    tecnico_nombre: str = ""
+    fecha_ejecucion: str | None = None
+    costo_cop: float | None = None
+
+
+@app.get("/api/anomalies", tags=["Anomalías y O&M"])
+def get_portfolio_anomalies() -> dict[str, Any]:
+    """
+    Ejecuta el motor estadístico de anomalías en 4 capas (reglas duras, esperado físico,
+    ratio contra mediana de plantas vecinas del Valle y z-score robusto MAD + EWMA)
+    usando el histórico de `solger.kpi_diario` en Supabase.
+    """
+    try:
+        plants_data = fusion_client.get_plant_list()
+        raw_plants = plants_data.get("data", {}).get("list", [])
+        plants = supabase_store.auto_sync_plants(raw_plants)
+        plant_codes = [p["plantCode"] for p in plants]
+
+        kpi_data = fusion_client.get_station_real_kpi(plant_codes)
+        kpi_list = kpi_data.get("data", []) or []
+        kpi_map = {
+            (k.get("plantCode") or k.get("stationCode")): k.get("dataItemMap", {})
+            for k in kpi_list
+        }
+
+        today_str = datetime.now(BOGOTA_TZ).strftime("%Y-%m-%d")
+        hist_residuals = supabase_store.fetch_historical_residuals()
+
+        observations: list[anomaly_engine.PlantDayObservation] = []
+        for p in plants:
+            code = p["plantCode"]
+            dim = kpi_map.get(code, {})
+            day_p = float(dim.get("day_power") or 0.0)
+            eff_cap = float(p.get("capacity") or 0.0)
+            health = int(dim.get("real_health_state") or 3)
+            observations.append(
+                anomaly_engine.PlantDayObservation(
+                    plant_code=code,
+                    plant_name=p.get("plantName", code),
+                    fecha=today_str,
+                    gen_kwh=day_p,
+                    kwp_effective=eff_cap,
+                    ghi_sat_kwh_m2=kpi_domain.HSP_REF,
+                    pr_base=kpi_domain.PR_DESIGN,
+                    health_state=health,
+                    tariff_cop_kwh=964.13,  # Tarifa referencia Celsia CU Valle
+                )
+            )
+
+        evaluations = anomaly_engine.evaluate_portfolio_day(observations, hist_residuals)
+        supabase_store.save_anomalies(evaluations)
+
+        detected = [e for e in evaluations if e.get("anomalia") is not None]
+        return {
+            "success": True,
+            "date": today_str,
+            "totalPlants": len(evaluations),
+            "anomaliesCount": len(detected),
+            "evaluations": evaluations,
+        }
+    except Exception as exc:
+        _handle_fusion_errors(exc)
+
+
+@app.get("/api/maintenance/orders", tags=["Anomalías y O&M"])
+def get_maintenance_orders(plant_code: str | None = Query(default=None)) -> dict[str, Any]:
+    """Lista las órdenes de trabajo / mantenimientos desde `solger.orden_trabajo` en Supabase."""
+    orders = supabase_store.list_work_orders(plant_code)
+    return {"success": True, "total": len(orders), "orders": orders}
+
+
+@app.post("/api/maintenance/orders", tags=["Anomalías y O&M"])
+def create_maintenance_order(body: WorkOrderCreate) -> dict[str, Any]:
+    """Registra una orden de trabajo o intervención en `solger.orden_trabajo` en Supabase."""
+    created = supabase_store.create_work_order(body.model_dump())
+    if created is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo registrar la orden en Supabase (verificar schema solger).",
+        )
+    return {"success": True, "order": created}
+

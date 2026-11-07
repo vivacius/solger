@@ -4,6 +4,9 @@ export interface Plant {
   plantCode: string;
   plantName: string;
   capacity: number;
+  capacityNominal?: number;
+  capacityEstimated?: boolean;
+  capacityEstimationMethod?: string;
   latitude: string | null;
   longitude: string | null;
   plantAddress: string | null;
@@ -96,6 +99,35 @@ export interface AlertsResponse {
   success: boolean;
   total: number;
   alarms: AlarmItem[];
+}
+
+export interface AnomalyEvaluation {
+  plant_code: string;
+  plant_name: string;
+  fecha: string;
+  gen_kwh: number;
+  expected_kwh: number;
+  yf_kwh_kwp: number | null;
+  ratio_pares: number | null;
+  residual: number | null;
+  z_score_robusto: number | null;
+  ewma_residuo: number | null;
+  kwh_perdidos: number;
+  cop_perdidos: number;
+  anomalia: {
+    tipo: string;
+    severidad: 'info' | 'atencion' | 'critica';
+    descripcion: string;
+    recomendacion: string;
+  } | null;
+}
+
+export interface AnomaliesResponse {
+  success: boolean;
+  date: string;
+  totalPlants: number;
+  anomaliesCount: number;
+  evaluations: AnomalyEvaluation[];
 }
 
 export type HealthState = 1 | 2 | 3; // 1=offline, 2=alarm, 3=ok (Huawei Northbound)
