@@ -1,0 +1,217 @@
+/* ─────────────────────────────────────────────────────────────
+   LandingPage.css — Página de inicio del Centro de Inteligencia Energética
+   ───────────────────────────────────────────────────────────── */
+
+/* ── Root ────────────────────────────────────────────────────── */
+.landing-root {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* ── Video background ─────────────────────────────────────────── */
+.landing-video-wrapper {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.landing-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  /* Slight desaturation so content is readable */
+  filter: brightness(0.55) saturate(0.9);
+}
+
+.landing-video.loaded {
+  opacity: 1;
+}
+
+/* Gradient overlay: dark bottom vignette + subtle green tint at top */
+.landing-overlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(7, 17, 31, 0.45)   0%,
+      rgba(7, 17, 31, 0.25)  40%,
+      rgba(7, 17, 31, 0.70)  85%,
+      rgba(7, 17, 31, 0.92) 100%
+    ),
+    linear-gradient(
+      135deg,
+      rgba(88, 174, 50, 0.08) 0%,
+      transparent 60%
+    );
+}
+
+/* ── Content panel ────────────────────────────────────────────── */
+.landing-content {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 1.1rem;
+  padding: 2rem 2.2rem;
+
+  /* Glass card */
+  background: rgba(7, 17, 31, 0.55);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 20px;
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(88, 174, 50, 0.12) inset;
+  max-width: 420px;
+  width: 88%;
+
+  /* Entrance animation */
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+
+.landing-content.animate-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Logos ────────────────────────────────────────────────────── */
+.landing-logos {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+}
+
+.landing-logo-main {
+  height: 60px;
+  width: auto;
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.18));
+  object-fit: contain;
+}
+
+/* ── Divider ──────────────────────────────────────────────────── */
+.landing-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 340px;
+}
+
+.landing-divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(88, 174, 50, 0.5),
+    transparent
+  );
+}
+
+.landing-divider-icon {
+  font-size: 1.1rem;
+  filter: drop-shadow(0 0 6px rgba(88, 174, 50, 0.6));
+}
+
+/* ── Titles ───────────────────────────────────────────────────── */
+.landing-h1 {
+  font-size: clamp(1.25rem, 3vw, 1.75rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  color: #FFFFFF;
+  text-shadow:
+    0 0 24px rgba(88, 174, 50, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* ── CTA Button ───────────────────────────────────────────────── */
+.landing-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.9rem 2.4rem;
+  border-radius: 14px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #58AE32 0%, #3D8A1F 100%);
+  box-shadow:
+    0 4px 20px rgba(88, 174, 50, 0.45),
+    0 1px 0 rgba(255, 255, 255, 0.15) inset;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+  margin-top: 0.25rem;
+}
+
+.landing-cta:hover {
+  background: linear-gradient(135deg, #6AC03D 0%, #4A9F28 100%);
+  box-shadow:
+    0 8px 32px rgba(88, 174, 50, 0.60),
+    0 1px 0 rgba(255, 255, 255, 0.20) inset;
+  transform: translateY(-2px);
+}
+
+.landing-cta:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 10px rgba(88, 174, 50, 0.35);
+}
+
+.landing-cta-text {
+  display: inline-block;
+}
+
+.landing-cta-arrow {
+  font-size: 1.2rem;
+  transition: transform 0.18s ease;
+}
+
+.landing-cta:hover .landing-cta-arrow {
+  transform: translateX(4px);
+}
+
+/* ── Footer note ──────────────────────────────────────────────── */
+.landing-footer-note {
+  font-size: 0.72rem;
+  color: rgba(148, 163, 184, 0.7);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-top: -0.25rem;
+}
+
+/* ── Responsive ───────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .landing-content {
+    gap: 1.2rem;
+    padding: 2rem 1.5rem;
+  }
+
+  .landing-logo-main {
+    height: 56px;
+  }
+
+  .landing-badges {
+    gap: 0.4rem;
+  }
+}

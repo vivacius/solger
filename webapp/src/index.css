@@ -1,0 +1,289 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..800;1,14..32,300..800&display=swap');
+@import "tailwindcss";
+
+/* ────────────────────────────────────────────────────────────────
+   SOLGER Design System — Global Tokens
+   Tailwind v4 — CSS-first configuration
+   ──────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Brand */
+  --solger-green:   #58AE32;
+  --solger-green-d: #3D8A1F;   /* dark variant */
+  --solger-green-l: #E6F5DC;   /* light bg tint */
+  --solger-gold:    #F5B914;
+  --solger-gold-l:  #FEF8E0;
+  --solger-teal:    #24A5AE;
+  --solger-teal-l:  #E0F5F6;
+  --solger-red:     #EF4444;
+  --solger-red-l:   #FEE2E2;
+
+  /* Surface — Amarillo SOLGER con transparencia para gran contraste */
+  --bg:          #FAF8F2;
+  --bg-subtle:   #F2EFE8;
+  --card:        #FFFFFF;
+  --border:      rgba(15, 23, 42, 0.08);
+  --border-soft: rgba(15, 23, 42, 0.05);
+
+  /* Text */
+  --text-primary:   #172033;
+  --text-secondary: #64748B;
+  --text-tertiary:  #94A3B8;
+
+  /* Sidebar */
+  --sidebar-bg:       #07111F;
+  --sidebar-bg-hover: rgba(255,255,255,0.05);
+  --sidebar-active:   rgba(88,174,50,0.12);
+  --sidebar-border:   rgba(255,255,255,0.06);
+  --sidebar-text:     #94A3B8;
+  --sidebar-text-a:   #F8FAFC;
+
+  /* Shadows — refined, non-exaggerated */
+  --shadow-xs:   0 1px 2px rgba(15,23,42,0.04);
+  --shadow-sm:   0 1px 3px rgba(15,23,42,0.05), 0 1px 2px rgba(15,23,42,0.02);
+  --shadow-md:   0 4px 16px rgba(15,23,42,0.06), 0 1px 4px rgba(15,23,42,0.03);
+  --shadow-lg:   0 12px 32px rgba(15,23,42,0.08), 0 4px 8px rgba(15,23,42,0.04);
+
+  /* Radius */
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  14px;
+  --radius-xl:  18px;
+
+  /* Sidebar width */
+  --sidebar-w: 240px;
+
+  /* Header height */
+  --header-h: 56px;
+}
+
+/* ── Reset ────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+/* ── Typography helpers ───────────────────────────────────────── */
+.page-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.label-xs {
+  font-size: 0.6875rem;  /* 11px */
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.kpi-value {
+  font-size: 1.875rem;  /* 30px */
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+/* ── Card — shared style ──────────────────────────────────────── */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.card-header {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--solger-green); }
+
+/* ── Animations ──────────────────────────────────────────────── */
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-spin-slow { animation: spin-slow 1s linear infinite; }
+
+.skeleton {
+  background: linear-gradient(90deg, #F1F5F9 25%, #E9EEF5 50%, #F1F5F9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+/* ── Focus ───────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--solger-green);
+  outline-offset: 2px;
+}
+
+/* ── Leaflet overrides ────────────────────────────────────────── */
+.leaflet-container { background: var(--bg) !important; }
+.leaflet-popup-content-wrapper {
+  background: var(--card) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+.leaflet-popup-tip { background: var(--card) !important; }
+
+/* ── Recharts overrides ──────────────────────────────────────── */
+.recharts-tooltip-wrapper { outline: none !important; }
+.recharts-surface { overflow: visible; }
+.recharts-legend-wrapper { padding-top: 12px !important; }
+
+/* ── Bottom Navigation Bar (móvil) ──────────────────────────── */
+:root {
+  --bottom-nav-h: 60px;
+}
+
+.bottom-nav {
+  display: none; /* oculto en desktop */
+}
+
+/* ── Mobile breakpoint ──────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Ocultar nav horizontal y widgets del header en móvil */
+  .header-nav-desktop,
+  .header-widgets-desktop {
+    display: none !important;
+  }
+
+  /* Espacio inferior para no tapar el contenido con la bottom bar */
+  .layout-content {
+    padding-bottom: calc(var(--bottom-nav-h) + 12px) !important;
+  }
+
+  /* Mostrar bottom nav */
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: var(--bottom-nav-h);
+    z-index: 50;
+    background: rgba(7, 17, 31, 0.97);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    align-items: stretch;
+    justify-content: space-around;
+    padding: 0 4px;
+    padding-bottom: env(safe-area-inset-bottom); /* iPhone notch */
+  }
+
+  .bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    flex: 1;
+    text-decoration: none;
+    color: #64748B;
+    padding: 6px 2px 4px;
+    border-radius: 10px;
+    transition: color 0.15s, background 0.15s;
+    position: relative;
+  }
+
+  .bottom-nav-item.active {
+    color: #58AE32;
+  }
+
+  .bottom-nav-item:not(.active):active {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  /* Indicador verde superior del ítem activo */
+  .bottom-nav-item.active::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 2px;
+    border-radius: 0 0 3px 3px;
+    background: #58AE32;
+    box-shadow: 0 0 6px rgba(88, 174, 50, 0.6);
+  }
+
+  .bottom-nav-icon-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .bottom-nav-badge {
+    position: absolute;
+    top: -2px;
+    right: -4px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #EF4444;
+    box-shadow: 0 0 5px rgba(239, 68, 68, 0.6);
+    border: 1.5px solid rgba(7, 17, 31, 0.97);
+  }
+
+  .bottom-nav-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1;
+  }
+}
+
