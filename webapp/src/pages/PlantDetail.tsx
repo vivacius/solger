@@ -381,7 +381,7 @@ export default function PlantDetail() {
             <div style={{ padding: '8px 14px', borderBottom: `1px solid ${BRAND.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <p className="section-title" style={{ fontSize: 13 }}>Balance de Energía — Mes (kWh)</p>
               <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 99, background: BRAND.greenL, color: BRAND.greenD }}>
-                Supabase · solger.kpi_diario
+                Histórico consolidado
               </span>
             </div>
             <div style={{ padding: '8px' }}>

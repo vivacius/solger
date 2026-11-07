@@ -140,10 +140,55 @@
     0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
+/* ── Integrated Login Form ────────────────────────────────────── */
+.landing-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  width: 100%;
+  max-width: 310px;
+  margin-top: 0.2rem;
+}
+
+.landing-input {
+  width: 100%;
+  padding: 0.72rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 23, 42, 0.55);
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  outline: none;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.landing-input::placeholder {
+  color: rgba(203, 213, 225, 0.55);
+}
+
+.landing-input:focus {
+  border-color: rgba(88, 174, 50, 0.65);
+  background: rgba(15, 23, 42, 0.75);
+  box-shadow: 0 0 0 3px rgba(88, 174, 50, 0.18);
+}
+
+.landing-error {
+  font-size: 0.78rem;
+  color: #FECACA;
+  background: rgba(239, 68, 68, 0.22);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 10px;
+  padding: 0.45rem 0.75rem;
+}
+
 /* ── CTA Button ───────────────────────────────────────────────── */
 .landing-cta {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 100%;
   gap: 0.6rem;
   padding: 0.9rem 2.4rem;
   border-radius: 14px;

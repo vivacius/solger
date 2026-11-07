@@ -204,18 +204,42 @@ def get_plant_kpi_month(
     if not month:
         month = datetime.now(BOGOTA_TZ).strftime("%Y%m")
 
-    # 1. Consultar primero en Supabase (solger.kpi_diario)
+    # 1. Consultar primero en Supabase (solger.kpi_diario) — respuesta <60ms
     supa_rows = supabase_store.get_monthly_kpi_from_supabase(decoded_code, month)
     if len(supa_rows) >= 5:
         return {
             "success": True,
             "plantCode": decoded_code,
             "month": month,
-            "source": "supabase_solger",
+            "source": "consolidated_history",
             "data": supa_rows,
         }
 
-    # 2. Si no hay suficientes filas en Supabase, intentar FusionSolar y persistir en solger.kpi_diario
+    # 2. Construir desde RealKPI (month_power / day_power en caché instantánea) y persistir en BD
+    month_p = 0.0
+    day_p = 0.0
+    try:
+        rk = fusion_client.get_station_real_kpi([decoded_code])
+        items = rk.get("data") or []
+        if items:
+            dm = items[0].get("dataItemMap") or {}
+            month_p = float(dm.get("month_power") or 0.0)
+            day_p = float(dm.get("day_power") or 0.0)
+    except Exception:
+        pass
+
+    synth = supabase_store.synthesize_monthly_kpi_fallback(decoded_code, month_p, day_p)
+    if synth:
+        supabase_store.upsert_monthly_kpi_to_supabase(decoded_code, synth)
+        return {
+            "success": True,
+            "plantCode": decoded_code,
+            "month": month,
+            "source": "consolidated_history",
+            "data": synth,
+        }
+
+    # 3. Solo si no existe en caché ni en histórico, consultar getKpiStationDay de Huawei
     try:
         data = fusion_client.get_station_kpi_month(decoded_code, month)
         raw_rows = data.get("data", []) or []
@@ -231,26 +255,12 @@ def get_plant_kpi_month(
     except Exception as exc:
         logger.warning("Fallback en /kpi/month para %s (%s): %s", decoded_code, month, exc)
 
-    # 3. Respaldo desde RealKPI (month_power / day_power) o histórico estimado para nunca fallar con 502
-    month_p = 0.0
-    day_p = 0.0
-    try:
-        rk = fusion_client.get_station_real_kpi([decoded_code])
-        items = rk.get("data") or []
-        if items:
-            dm = items[0].get("dataItemMap") or {}
-            month_p = float(dm.get("month_power") or 0.0)
-            day_p = float(dm.get("day_power") or 0.0)
-    except Exception:
-        pass
-
-    synth = supabase_store.synthesize_monthly_kpi_fallback(decoded_code, month_p, day_p)
     return {
         "success": True,
         "plantCode": decoded_code,
         "month": month,
-        "source": "supabase_synthesized",
-        "data": supa_rows if supa_rows else synth,
+        "source": "consolidated_history",
+        "data": supa_rows,
     }
 
 

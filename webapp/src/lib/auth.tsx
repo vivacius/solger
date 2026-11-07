@@ -93,16 +93,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       validPasswords.includes(cleanPass)
     ) {
       saveSession({
-        id: 'solger-analyst-01',
+        id: 'solger-user-01',
         email: cleanId.includes('@') ? cleanId : `${cleanId.toLowerCase()}@solger.com.co`,
-        nombre: cleanId.toUpperCase() === 'SOLGER' ? 'Analista SOLGER' : cleanId,
+        nombre: 'SOLGER',
       });
       return { ok: true };
     }
 
     return {
       ok: false,
-      error: 'Usuario o contraseña incorrectos. Verifica tus credenciales en Supabase Auth o usa el usuario operativo SOLGER.',
+      error: 'Usuario o contraseña incorrectos.',
     };
   };
 
