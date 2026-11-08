@@ -91,7 +91,9 @@ def get_base64_image(path: str) -> str:
 def get_logo_path() -> str:
     """Busca la ruta del logo de SOLGER."""
     candidates = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "logo.png")),
         os.path.abspath(os.path.join(os.path.dirname(__file__), "../webapp/public/logo.png")),
+        os.path.abspath(os.path.join(os.getcwd(), "analytics/logo.png")),
         os.path.abspath(os.path.join(os.getcwd(), "../webapp/public/logo.png")),
         os.path.abspath(os.path.join(os.getcwd(), "webapp/public/logo.png")),
         "../webapp/public/logo.png",
@@ -99,7 +101,7 @@ def get_logo_path() -> str:
     for c in candidates:
         if os.path.exists(c):
             return c
-    return "../webapp/public/logo.png"
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "logo.png"))
 
 try:
     import matplotlib
@@ -942,7 +944,7 @@ def build_executive_html_report(
       <table width="100%" cellpadding="0" cellspacing="0">
         <tr>
           <td style="padding:22px 28px 18px;">
-            <img src="{logo_src}" alt="SOLGER" style="height:28px;width:auto;" />
+            <img src="{logo_src or '/logo.png'}" onerror="this.onerror=null;this.src='/logo.png';" alt="SOLGER" style="height:30px;width:auto;background:rgba(255,255,255,0.92);padding:4px 10px;border-radius:6px;" />
             <div style="margin-top:10px;font-size:19px;font-weight:800;color:#FFFFFF;letter-spacing:-0.02em;line-height:1.2;">
               Reporte Ejecutivo — Cierre Operativo Diario
             </div>
@@ -1179,7 +1181,7 @@ body{{font-family:'Segoe UI',sans-serif;background:{C_BG};color:{C_DARK};margin:
       <span style="display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;
                    color:{sc};background:{sb};border:1px solid {sc}30;margin-top:6px;">{sl}</span>
     </div>
-    <img src="{logo_src}" alt="SOLGER" style="height:26px;width:auto;" />
+    <img src="{logo_src or '/logo.png'}" onerror="this.onerror=null;this.src='/logo.png';" alt="SOLGER" style="height:26px;width:auto;" />
   </div>
   <div class="kgrid">
     <div class="kc" style="border-top:2px solid {C_GOLD};"><div class="kl">Gen. Hoy</div><div class="kv">{day_power:.1f} kWh</div></div>
