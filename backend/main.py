@@ -10,9 +10,10 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, date
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -25,6 +26,7 @@ from fusionsolar import APIError, AuthenticationError, BOGOTA_TZ, fusion_client
 import kpi as kpi_domain
 import market as market_svc
 import invoice_store
+import invoice_report
 import supabase_store
 import celsia_parser
 import anomalies as anomaly_engine
@@ -226,6 +228,7 @@ def get_plant_kpi_day(
                 month_p = float(dm.get("month_power") or 0.0)
         except Exception:
             pass
+
         rows = supabase_store.synthesize_hourly_kpi_fallback(
             decoded_code,
             day_power=day_p,
@@ -493,13 +496,282 @@ class InvoiceCreate(BaseModel):
     reading_previous_kwh: float | None = None
     reading_current_kwh: float | None = None
     multiplier: float | None = None
+    consumo_importado_cop: float | None = None
+    credito_energia_cop: float | None = None
+    consumo_neto_kwh: float | None = None
     subtotal_active_cop: float | None = None
+    comercializacion_cop: float | None = None
     subsidy_or_contrib_cop: float | None = None
+    ajuste_decenas_cop: float | None = None
+    subtotal_energia_cop: float | None = None
+    otros_cobros_cop: float | None = None
+    total_pagar_cop: float | None = None
     kwh_billed: float
     price_cop_kwh: float
+    c_rate: float | None = None
     total_cop: float
     componentes_cu: dict[str, float] | None = None
+    exc_celsia: float | None = None
+    credito_energia_kwh: float | None = None
+    audit: dict[str, Any] | None = None
     notes: str = ""
+
+
+def _get_plant_dict(plant_code: str) -> dict[str, Any]:
+    """Obtiene los metadatos de la planta (nombre, capacidad kWp, ciudad, etc.)."""
+    try:
+        data = fusion_client.get_plant_list()
+        raw_plants = (data.get("data") or {}).get("list") or []
+        for p in raw_plants:
+            if p.get("plantCode") == plant_code:
+                return {
+                    "plantCode": plant_code,
+                    "plantName": p.get("plantName", "Planta"),
+                    "capacity": float(p.get("capacity") or 0.0),
+                    "city": p.get("gridConnectionDate", "") or "Valle del Cauca",
+                    "location": p.get("plantAddress", "Valle del Cauca"),
+                }
+    except Exception:
+        pass
+    return {"plantCode": plant_code, "plantName": "Planta Solar", "capacity": 0.0, "city": "Valle del Cauca"}
+
+
+def _run_invoice_creg_audit(inv: dict[str, Any], plant_info: dict[str, Any] | None = None) -> dict[str, Any]:
+    """
+    Ejecuta la auditoría integral CREG 174 cruzando la factura contra telemetría FusionSolar
+    y precios spot de bolsa de XM.
+    """
+    plant_code = str(inv.get("plant_code") or "")
+    if not plant_info:
+        plant_info = _get_plant_dict(plant_code)
+
+    p_start = inv.get("period_start")
+    p_end = inv.get("period_end")
+    period = str(inv.get("period") or "2025-01")
+
+    if not p_start or not p_end:
+        try:
+            import calendar
+            parts = period.split("-")
+            y = int(parts[0])
+            m = int(parts[1])
+            last_day = calendar.monthrange(y, m)[1]
+            p_start = f"{y:04d}-{m:02d}-01"
+            p_end = f"{y:04d}-{m:02d}-{last_day:02d}"
+        except Exception:
+            p_start = f"{period}-01"
+            p_end = f"{period}-28"
+
+    months_to_query = sorted({p_start[:7].replace("-", ""), p_end[:7].replace("-", "")})
+    daily_records: list[dict[str, Any]] = []
+
+    for m_str in months_to_query:
+        if not m_str:
+            continue
+        try:
+            m_data = fusion_client.get_station_kpi_month(plant_code, m_str)
+            raw_rows = m_data.get("data") or []
+            if raw_rows:
+                norm = supabase_store.upsert_monthly_kpi_to_supabase(plant_code, raw_rows)
+                for r in norm:
+                    ts = r.get("collectTime")
+                    if ts:
+                        d_str = datetime.fromtimestamp(ts / 1000.0, tz=BOGOTA_TZ).strftime("%Y-%m-%d")
+                        if p_start <= d_str <= p_end:
+                            dim = r.get("dataItemMap") or {}
+                            gen_val = round(float(dim.get("PVYield") or dim.get("inverter_power") or dim.get("inverterYield") or 0.0), 2)
+                            exp_val = round(float(dim.get("ongrid_power") or 0.0), 2)
+                            imp_val = round(float(dim.get("buyPower") or dim.get("buy_power") or 0.0), 2)
+                            auto_val = round(float(dim.get("selfUsePower") or max(0.0, gen_val - exp_val)), 2)
+                            use_val = round(float(dim.get("use_power") or (auto_val + imp_val)), 2)
+                            daily_records.append({
+                                "fecha": d_str,
+                                "PVYield": gen_val,
+                                "selfUsePower": auto_val,
+                                "ongrid_power": exp_val,
+                                "buyPower": imp_val,
+                                "use_power": use_val,
+                            })
+        except Exception as exc:
+            logger.warning("Fallo consultando FusionSolar para %s en %s: %s", plant_code, m_str, exc)
+
+    if not daily_records:
+        try:
+            supa_kpi = supabase_store.get_monthly_kpi_from_supabase(plant_code)
+            for r in supa_kpi:
+                ts = r.get("collectTime")
+                if ts:
+                    d_str = datetime.fromtimestamp(ts / 1000.0, tz=BOGOTA_TZ).strftime("%Y-%m-%d")
+                    if p_start <= d_str <= p_end:
+                        dim = r.get("dataItemMap") or {}
+                        gen_val = round(float(dim.get("PVYield") or dim.get("inverter_power") or 0.0), 2)
+                        exp_val = round(float(dim.get("ongrid_power") or 0.0), 2)
+                        imp_val = round(float(dim.get("buyPower") or 0.0), 2)
+                        auto_val = round(float(dim.get("selfUsePower") or max(0.0, gen_val - exp_val)), 2)
+                        daily_records.append({
+                            "fecha": d_str,
+                            "PVYield": gen_val,
+                            "selfUsePower": auto_val,
+                            "ongrid_power": exp_val,
+                            "buyPower": imp_val,
+                            "use_power": round(auto_val + imp_val, 2),
+                        })
+        except Exception:
+            pass
+
+    if not daily_records:
+        val_dir = Path(__file__).resolve().parent.parent / "analytics" / "validaciones"
+        if val_dir.exists():
+            clean_period = period.replace("-", "").strip()
+            y_part = period.split("-")[0] if "-" in period else period[:4]
+            m_num = int(period.split("-")[1]) if "-" in period and len(period.split("-")) > 1 else 0
+            m_names = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+            target_m_name = m_names[m_num - 1] if 1 <= m_num <= 12 else ""
+
+            for f in val_dir.glob("Validacion_*.xlsx"):
+                fname = f.name.upper()
+                matches_period = (
+                    (clean_period in fname)
+                    or (period in fname)
+                    or (y_part in fname and target_m_name and target_m_name in fname)
+                    or (y_part in fname and f"{m_num:02d}." in fname)
+                )
+                if matches_period:
+                    try:
+                        import openpyxl
+                        wb = openpyxl.load_workbook(f, data_only=True, read_only=True)
+                        if "FusionSolar diario" in wb.sheetnames:
+                            ws = wb["FusionSolar diario"]
+                            for row in list(ws.iter_rows(values_only=True))[1:]:
+                                if not row or not row[0] or str(row[0]).startswith("TOTAL"):
+                                    continue
+                                f_val = row[0]
+                                if isinstance(f_val, datetime):
+                                    f_str = f_val.strftime("%Y-%m-%d")
+                                else:
+                                    f_str = str(f_val)[:10]
+                                if p_start <= f_str <= p_end:
+                                    gen_v = float(row[1] or 0.0)
+                                    auto_v = float(row[2] or 0.0)
+                                    exp_v = float(row[3] or 0.0)
+                                    imp_v = float(row[4] or 0.0)
+                                    use_v = float(row[5] or (auto_v + imp_v))
+                                    daily_records.append({
+                                        "fecha": f_str,
+                                        "PVYield": gen_v,
+                                        "selfUsePower": auto_v,
+                                        "ongrid_power": exp_v,
+                                        "buyPower": imp_v,
+                                        "use_power": use_v,
+                                    })
+                            if daily_records:
+                                break
+                    except Exception:
+                        pass
+
+    unique_map: dict[str, dict] = {}
+    for r in daily_records:
+        unique_map[r["fecha"]] = r
+    daily_records = sorted(unique_map.values(), key=lambda x: x["fecha"])
+
+    gen_fusion = round(sum(r["PVYield"] for r in daily_records), 2)
+    self_fusion = round(sum(r["selfUsePower"] for r in daily_records), 2)
+    exc_fusion = round(sum(r["ongrid_power"] for r in daily_records), 2)
+    imp_fusion = round(sum(r["buyPower"] for r in daily_records), 2)
+    load_fusion = round(sum(r["use_power"] for r in daily_records), 2)
+
+    if imp_fusion == 0.0 and inv.get("import_kwh"):
+        imp_fusion = float(inv["import_kwh"])
+    if exc_fusion == 0.0 and inv.get("export_kwh"):
+        exc_fusion = float(inv["export_kwh"])
+
+    # 2. Precio de Bolsa XM
+    try:
+        from datetime import date as dt_date
+        d_s = dt_date.fromisoformat(p_start)
+        d_e = dt_date.fromisoformat(p_end)
+        spot_res = market_svc.get_spot_price(d_s, d_e)
+        xm_spot_price = round(float(spot_res.get("avg") or 380.0), 2)
+    except Exception:
+        xm_spot_price = 380.0
+
+    # 3. Datos de la factura Celsia
+    imp_celsia = float(inv.get("kwh_billed") or 0.0)
+    exc_celsia = float(inv.get("exc_celsia") or inv.get("credito_energia_kwh") or 0.0)
+    cu_rate = float(inv.get("price_cop_kwh") or 977.59)
+    comp_cu = inv.get("componentes_cu") or {}
+    c_rate = float(inv.get("c_rate") or comp_cu.get("C_comercializacion") or comp_cu.get("C") or 176.65)
+    t1_rate = round(cu_rate - c_rate, 2)
+
+    # 4. Liquidación CREG 174 (FusionSolar + XM) y Liquidación Factura Celsia
+    exc_1_kwh = round(min(exc_fusion, imp_fusion), 2)
+    exc_2_kwh = round(max(0.0, exc_fusion - imp_fusion), 2)
+    remun_exc1 = round(exc_1_kwh * t1_rate, 2)
+    remun_exc2 = round(exc_2_kwh * xm_spot_price, 2)
+
+    net_celsia = round(max(0.0, imp_celsia - exc_celsia), 2)
+    net_fusion = round(max(0.0, imp_fusion - exc_1_kwh), 2)
+
+    has_contrib = bool(inv.get("subsidy_or_contrib_cop") and float(inv.get("subsidy_or_contrib_cop")) > 0)
+    if not has_contrib:
+        sub_act = float(inv.get("subtotal_active_cop") or 0)
+        tot = float(inv.get("total_cop") or 0)
+        if sub_act > 0 and (tot / sub_act) > 1.15:
+            has_contrib = True
+
+    # Desglose monetario real CREG 174 (Telemetría FusionSolar + XM):
+    # Valor Consumo Neto (Importado - Exp1) * CU + Comercialización (Exp1 * C) + Contribución 20% - Exp2 * Bolsa XM
+    costo_neto_fusion = round(net_fusion * cu_rate, 2)
+    comercializacion_fusion = round(exc_1_kwh * c_rate, 2)
+    contrib_fusion = round(costo_neto_fusion * 0.20, 2) if has_contrib else 0.0
+    subtotal_fusion_creg = round(costo_neto_fusion + comercializacion_fusion + contrib_fusion - remun_exc2, 0)
+
+    # Desglose monetario cobrado por Celsia en factura:
+    # Valor Consumo Neto + Comercialización Exp1 + Contribución 20% (+ Ajuste a decenas)
+    val_neto_celsia = float(inv.get("subtotal_active_cop") or round(net_celsia * cu_rate, 2))
+    val_com_celsia = float(inv.get("comercializacion_cop") or round(exc_celsia * c_rate, 2))
+    val_contrib_celsia = float(inv.get("subsidy_or_contrib_cop") or (round(val_neto_celsia * 0.20, 2) if has_contrib else 0.0))
+    subtotal_celsia_calc = round(val_neto_celsia + val_com_celsia + val_contrib_celsia, 0)
+    subtotal_celsia = float(inv.get("subtotal_energia_cop") or subtotal_celsia_calc)
+    if abs(subtotal_celsia - subtotal_celsia_calc) > 50000:
+        subtotal_celsia = subtotal_celsia_calc
+
+    sobrecosto_cop = round(subtotal_celsia - subtotal_fusion_creg, 0)
+
+    audit_payload = {
+        "period_start": p_start,
+        "period_end": p_end,
+        "days": len(daily_records) or int(inv.get("days_billed") or 30),
+        "imp_celsia": imp_celsia,
+        "imp_fusion": imp_fusion,
+        "exc_celsia": exc_celsia,
+        "exc_fusion": exc_fusion,
+        "gen_fusion": gen_fusion,
+        "self_fusion": self_fusion,
+        "load_fusion": load_fusion,
+        "exc_1_kwh": exc_1_kwh,
+        "exc_2_kwh": exc_2_kwh,
+        "net_celsia": net_celsia,
+        "net_fusion": net_fusion,
+        "cu_rate": cu_rate,
+        "c_rate": c_rate,
+        "t1_rate": t1_rate,
+        "xm_spot_price": xm_spot_price,
+        "val_neto_celsia": val_neto_celsia,
+        "val_com_celsia": val_com_celsia,
+        "val_contrib_celsia": val_contrib_celsia,
+        "costo_neto_fusion": costo_neto_fusion,
+        "comercializacion_fusion": comercializacion_fusion,
+        "contrib_fusion": contrib_fusion,
+        "remun_exc1_cop": remun_exc1,
+        "remun_exc2_cop": remun_exc2,
+        "has_contrib": has_contrib,
+        "subtotal_celsia": subtotal_celsia,
+        "subtotal_fusion_creg": subtotal_fusion_creg,
+        "sobrecosto_cop": sobrecosto_cop,
+        "daily_series": daily_records,
+    }
+    return audit_payload
 
 
 @app.post("/api/invoices/parse-pdf", tags=["Facturación"])
@@ -634,6 +906,88 @@ def verify_invoice(
     if result is None:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
     return {"success": True, "invoice": result}
+
+
+@app.post("/api/invoices/{invoice_id}/audit", tags=["Facturación"])
+def audit_invoice(invoice_id: str) -> dict[str, Any]:
+    """
+    Ejecuta la auditoría integral CREG 174 para una factura existente contra la telemetría
+    diaria de FusionSolar y precios de bolsa XM, calculando Excedentes Tipo 1 y 2,
+    consumo neto y sobrecosto COP.
+    """
+    inv = invoice_store.get_invoice(invoice_id)
+    if inv is None:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    plant_info = _get_plant_dict(str(inv.get("plant_code") or ""))
+    audit_data = _run_invoice_creg_audit(inv, plant_info)
+    updated = invoice_store.update_audit(invoice_id, audit_data)
+    if updated is None:
+        raise HTTPException(status_code=500, detail="No se pudo actualizar la auditoría de la factura")
+    return {"success": True, "invoice": updated}
+
+
+@app.post("/api/invoices/audit", tags=["Facturación"])
+def create_and_audit_invoice(body: InvoiceCreate) -> dict[str, Any]:
+    """
+    Registra una factura y ejecuta automáticamente su auditoría CREG 174 en un solo paso,
+    vinculando la cuenta de Celsia a la planta para futuros cruces inmediatos.
+    """
+    if body.plant_code and body.account_code:
+        supabase_store.bind_account_code_to_plant(body.plant_code, body.account_code, body.meter_number)
+
+    inv = invoice_store.create_invoice(body.model_dump())
+    plant_info = _get_plant_dict(body.plant_code)
+    audit_data = _run_invoice_creg_audit(inv, plant_info)
+    updated = invoice_store.update_audit(inv["id"], audit_data)
+    return {"success": True, "invoice": updated or inv}
+
+
+@app.get("/api/invoices/{invoice_id}/report/html", tags=["Facturación"])
+def get_invoice_html_report(invoice_id: str) -> HTMLResponse:
+    """
+    Genera y sirve el informe formal ejecutivo de auditoría CREG 174 en formato HTML
+    con membrete y branding de SOLGER, gráfica SVG de balance diario y dictamen técnico.
+    Apto para impresión / PDF con 1 clic.
+    """
+    inv = invoice_store.get_invoice(invoice_id)
+    if inv is None:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    plant_info = _get_plant_dict(str(inv.get("plant_code") or ""))
+    audit_data = inv.get("audit")
+    if not audit_data:
+        audit_data = _run_invoice_creg_audit(inv, plant_info)
+        inv = invoice_store.update_audit(invoice_id, audit_data) or inv
+
+    html = invoice_report.generate_invoice_audit_html(inv, audit_data, plant_info)
+    return HTMLResponse(content=html)
+
+
+@app.get("/api/invoices/{invoice_id}/report/excel", tags=["Facturación"])
+def get_invoice_excel_report(invoice_id: str) -> Response:
+    """
+    Genera y descarga el libro de cálculo Excel (.xlsx) con fórmulas vivas de auditoría,
+    hoja de telemetría diaria y hoja de liquidación CREG 174.
+    """
+    inv = invoice_store.get_invoice(invoice_id)
+    if inv is None:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    plant_info = _get_plant_dict(str(inv.get("plant_code") or ""))
+    audit_data = inv.get("audit")
+    if not audit_data:
+        audit_data = _run_invoice_creg_audit(inv, plant_info)
+        inv = invoice_store.update_audit(invoice_id, audit_data) or inv
+
+    excel_bytes = invoice_report.generate_invoice_audit_excel_bytes(plant_info, inv, audit_data)
+    inv_num = inv.get("invoice_number") or inv.get("period") or invoice_id[:8]
+    clean_num = str(inv_num).replace(" ", "_").replace("/", "-")
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="Auditoria_Factura_{clean_num}.xlsx"'},
+    )
 
 
 @app.delete("/api/invoices/{invoice_id}", tags=["Facturación"])
@@ -840,8 +1194,10 @@ def preview_executive_report() -> HTMLResponse:
             "expected": exp,
         })
 
-    p_path = "/tmp/portfolio_chart.png"
-    h_path = "/tmp/hsp_chart.png"
+    import tempfile
+    tmp_dir = tempfile.gettempdir()
+    p_path = os.path.join(tmp_dir, "portfolio_chart.png")
+    h_path = os.path.join(tmp_dir, "hsp_chart.png")
     rg.generate_portfolio_chart(sorted(plants_chart_data, key=lambda x: -x["day_power"]), p_path)
     rg.generate_hsp_chart(plants_chart_data, h_path)
 
@@ -883,8 +1239,10 @@ def preview_plant_report(safe_name: str) -> HTMLResponse:
     day_s = get_plant_kpi_day(pcode, date=None).get("data", [])
     month_s = get_plant_kpi_month(pcode, month=None).get("data", [])
 
-    pwr_p = f"/tmp/{clean}_power.png"
-    mon_p = f"/tmp/{clean}_monthly.png"
+    import tempfile
+    tmp_dir = tempfile.gettempdir()
+    pwr_p = os.path.join(tmp_dir, f"{clean}_power.png")
+    mon_p = os.path.join(tmp_dir, f"{clean}_monthly.png")
     rg.generate_power_chart(day_s, pwr_p, month_data=month_s)
     rg.generate_monthly_chart(month_s, mon_p)
 

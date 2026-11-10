@@ -142,28 +142,6 @@ export function ReportsPage() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <a
-            href="/presentacion-solger.html"
-            target="_blank"
-            rel="noreferrer"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '8px 13px',
-              borderRadius: 8,
-              fontSize: 12.5,
-              fontWeight: 700,
-              background: BRAND.tealL,
-              color: BRAND.teal,
-              border: '1px solid rgba(36,165,174,0.25)',
-              textDecoration: 'none',
-            }}
-          >
-            <ExternalLink size={13} />
-            Presentación Ejecutiva
-          </a>
-
           <button
             onClick={() => handleGenerate(false)}
             disabled={generating || sendingTelegram}

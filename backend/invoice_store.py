@@ -80,11 +80,12 @@ def create_invoice(data: dict[str, Any]) -> dict:
         "created_at": datetime.now().isoformat(),
         **data,
         # Campos de verificación — se llenan cuando se cruza con FusionSolar
-        "fusion_kwh": None,
-        "difference_kwh": None,
-        "difference_cop": None,
-        "status": "pending",  # pending | ok | discrepancy | critical
-        "verified_at": None,
+        "fusion_kwh": data.get("fusion_kwh"),
+        "difference_kwh": data.get("difference_kwh"),
+        "difference_cop": data.get("difference_cop"),
+        "status": data.get("status", "pending"),  # pending | ok | discrepancy | critical
+        "verified_at": data.get("verified_at"),
+        "audit": data.get("audit"),
     }
     invoices.append(invoice)
     _write_all(invoices)
@@ -133,6 +134,47 @@ def update_verification(
                 "import_kwh": import_kwh,
                 "difference_kwh": diff_kwh,
                 "difference_cop": diff_cop,
+                "status": status,
+                "verified_at": datetime.now().isoformat(),
+            })
+            _write_all(invoices)
+            try:
+                from supabase_store import sync_invoice_to_supabase
+                sync_invoice_to_supabase(inv)
+            except Exception:
+                pass
+            return inv
+    return None
+
+
+def update_audit(invoice_id: str, audit_data: dict[str, Any]) -> dict | None:
+    """
+    Actualiza la factura con el informe completo de auditoría CREG 174
+    (incluyendo daily_series, excedentes Tipo 1 y 2, precio XM, sobrecosto COP).
+    """
+    invoices = _read_all()
+    for inv in invoices:
+        if inv.get("id") == invoice_id:
+            sobrecosto = float(audit_data.get("sobrecosto_cop", 0.0))
+            imp_celsia = float(audit_data.get("imp_celsia", 0.0))
+            imp_fusion = float(audit_data.get("imp_fusion", 0.0))
+            diff_kwh = round(imp_celsia - imp_fusion, 2)
+
+            if abs(sobrecosto) > 50000 or (imp_celsia > 0 and abs(diff_kwh / imp_celsia) > 0.07):
+                status = "critical"
+            elif abs(sobrecosto) > 10000 or (imp_celsia > 0 and abs(diff_kwh / imp_celsia) > 0.03):
+                status = "discrepancy"
+            else:
+                status = "ok"
+
+            inv.update({
+                "audit": audit_data,
+                "fusion_kwh": imp_fusion,
+                "gen_kwh": audit_data.get("gen_fusion"),
+                "export_kwh": audit_data.get("exc_fusion"),
+                "import_kwh": imp_fusion,
+                "difference_kwh": diff_kwh,
+                "difference_cop": round(sobrecosto, 0),
                 "status": status,
                 "verified_at": datetime.now().isoformat(),
             })

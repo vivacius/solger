@@ -29,6 +29,8 @@ analytics/scratch/
 # Borradores / OS / Recibos locales con datos personales
 webapp/src/components/layout/Untitled-1.txt
 factura_ejemplo.pdf
+recibos_prueba/
+analytics/validaciones/
 .DS_Store
 Thumbs.db
 

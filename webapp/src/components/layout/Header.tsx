@@ -112,7 +112,19 @@ export function Header({ lastUpdated, onRefresh, loading }: HeaderProps) {
       </div>
 
       {/* ── Centro: Navegación Horizontal — oculto en móvil ─── */}
-      <nav className="header-nav-desktop" style={{ display: 'flex', alignItems: 'center', gap: 4, height: '100%', flexWrap: 'nowrap', overflow: 'hidden' }}>
+      <nav
+        className="header-nav-desktop"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          height: '100%',
+          flexWrap: 'nowrap',
+          overflowX: 'auto',
+          scrollbarWidth: 'none',
+          minWidth: 0,
+        }}
+      >
         {NAV_ITEMS.map(({ to, label, badge }) => {
           const active = isActive(to);
           return (
@@ -122,10 +134,10 @@ export function Header({ lastUpdated, onRefresh, loading }: HeaderProps) {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '6px 12px',
+                gap: 5,
+                padding: '5px 10px',
                 borderRadius: 6,
-                fontSize: 13,
+                fontSize: 12.5,
                 fontWeight: active ? 650 : 500,
                 color: active ? '#3D8A1F' : 'var(--text-secondary)',
                 background: active ? 'rgba(88,174,50,0.08)' : 'transparent',
@@ -133,6 +145,8 @@ export function Header({ lastUpdated, onRefresh, loading }: HeaderProps) {
                 textDecoration: 'none',
                 transition: 'all 0.15s ease',
                 position: 'relative',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
               }}
               onMouseEnter={e => {
                 if (!active) {

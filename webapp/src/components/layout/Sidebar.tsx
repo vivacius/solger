@@ -9,6 +9,7 @@ import {
   Wrench,
   TrendingUp,
   Receipt,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { useSidebar } from './Layout';
 
@@ -21,6 +22,7 @@ const NAV_MAIN = [
   { to: '/mantenimiento',  icon: Wrench,          label: 'Mantenimiento'  },
   { to: '/mercado',        icon: TrendingUp,      label: 'Mercado XM'    },
   { to: '/facturacion',    icon: Receipt,         label: 'Facturación'   },
+  { to: '/reportes',       icon: FileSpreadsheet, label: 'Reportes'      },
 ];
 
 export function Sidebar() {

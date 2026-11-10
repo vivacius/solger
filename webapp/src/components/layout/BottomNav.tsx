@@ -8,6 +8,7 @@ import {
   Wrench,
   TrendingUp,
   FileText,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -19,6 +20,7 @@ const NAV_ITEMS = [
   { to: '/mantenimiento',  icon: Wrench,          label: 'Mant.'    },
   { to: '/mercado',        icon: TrendingUp,      label: 'Mercado'  },
   { to: '/facturacion',    icon: FileText,        label: 'Factura'  },
+  { to: '/reportes',       icon: FileSpreadsheet, label: 'Reportes' },
 ];
 
 export function BottomNav() {

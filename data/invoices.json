@@ -1,1 +1,1310 @@
-[]
+[
+  {
+    "id": "44c43f96-c5f0-4dd1-a52b-3c4a85b39fb6",
+    "created_at": "2026-11-09T20:25:29.290343",
+    "company": "Celsia",
+    "plant_code": "NE=33808116",
+    "plant_name": "LA LECHERÍA",
+    "period": "2025-01",
+    "period_start": "2025-01-01",
+    "period_end": "2025-01-31",
+    "days_billed": 30,
+    "client_name": "LECHERIA MOTOR ELECTRICO RIEGO POTRERO",
+    "account_code": "9290482506",
+    "invoice_number": "CCCV2320202",
+    "meter_number": "2222170715",
+    "reading_previous_kwh": null,
+    "reading_current_kwh": null,
+    "multiplier": null,
+    "consumo_importado_cop": 4173429.47,
+    "credito_energia_cop": -1529850.14,
+    "consumo_neto_kwh": 2704.18,
+    "subtotal_active_cop": 2643579.33,
+    "comercializacion_cop": 276443.12,
+    "subsidy_or_contrib_cop": 528715.87,
+    "ajuste_decenas_cop": 1.68,
+    "subtotal_energia_cop": 3448740.0,
+    "otros_cobros_cop": 571760.0,
+    "total_pagar_cop": 4020500.0,
+    "kwh_billed": 4269.1,
+    "price_cop_kwh": 977.59,
+    "c_rate": 176.65,
+    "total_cop": 3448740.0,
+    "componentes_cu": {
+      "G_generacion": 394.8,
+      "C_comercializacion": 176.65,
+      "T_transmision": 58.19,
+      "D_distribucion": 264.32,
+      "PR_perdidas": 73.73,
+      "R_restricciones": 9.9,
+      "cu_calculado": 977.59,
+      "tarifa_excedente_t1_agpe": 800.94
+    },
+    "exc_celsia": 1564.92,
+    "credito_energia_kwh": 1564.92,
+    "audit": {
+      "period_start": "2025-01-01",
+      "period_end": "2025-01-31",
+      "days": 31,
+      "imp_celsia": 4269.1,
+      "imp_fusion": 3516.4,
+      "exc_celsia": 1564.92,
+      "exc_fusion": 3233.21,
+      "gen_fusion": 5246.34,
+      "self_fusion": 2013.13,
+      "load_fusion": 5529.53,
+      "exc_1_kwh": 3233.21,
+      "exc_2_kwh": 0.0,
+      "net_celsia": 2704.18,
+      "net_fusion": 283.19,
+      "cu_rate": 977.59,
+      "c_rate": 176.65,
+      "t1_rate": 800.94,
+      "xm_spot_price": 421.04,
+      "val_neto_celsia": 2643579.33,
+      "val_com_celsia": 276443.12,
+      "val_contrib_celsia": 528715.87,
+      "costo_neto_fusion": 276843.71,
+      "comercializacion_fusion": 571146.55,
+      "contrib_fusion": 55368.74,
+      "remun_exc1_cop": 2589607.22,
+      "remun_exc2_cop": 0.0,
+      "has_contrib": true,
+      "subtotal_celsia": 3448740.0,
+      "subtotal_fusion_creg": 903359.0,
+      "sobrecosto_cop": 2545381.0,
+      "daily_series": [
+        {
+          "fecha": "2025-01-01",
+          "PVYield": 89.62,
+          "selfUsePower": 40.47,
+          "ongrid_power": 49.15,
+          "buyPower": 58.26,
+          "use_power": 98.73
+        },
+        {
+          "fecha": "2025-01-02",
+          "PVYield": 126.34,
+          "selfUsePower": 88.71,
+          "ongrid_power": 37.63,
+          "buyPower": 219.1,
+          "use_power": 307.81
+        },
+        {
+          "fecha": "2025-01-03",
+          "PVYield": 113.99,
+          "selfUsePower": 109.47,
+          "ongrid_power": 4.52,
+          "buyPower": 359.48,
+          "use_power": 468.95
+        },
+        {
+          "fecha": "2025-01-04",
+          "PVYield": 137.35,
+          "selfUsePower": 127.82,
+          "ongrid_power": 9.53,
+          "buyPower": 319.27,
+          "use_power": 447.09
+        },
+        {
+          "fecha": "2025-01-05",
+          "PVYield": 120.44,
+          "selfUsePower": 113.11,
+          "ongrid_power": 7.33,
+          "buyPower": 344.46,
+          "use_power": 457.57
+        },
+        {
+          "fecha": "2025-01-06",
+          "PVYield": 103.06,
+          "selfUsePower": 97.69,
+          "ongrid_power": 5.37,
+          "buyPower": 234.55,
+          "use_power": 332.24
+        },
+        {
+          "fecha": "2025-01-07",
+          "PVYield": 161.07,
+          "selfUsePower": 41.18,
+          "ongrid_power": 119.89,
+          "buyPower": 68.1,
+          "use_power": 109.28
+        },
+        {
+          "fecha": "2025-01-08",
+          "PVYield": 186.85,
+          "selfUsePower": 51.69,
+          "ongrid_power": 135.16,
+          "buyPower": 64.43,
+          "use_power": 116.12
+        },
+        {
+          "fecha": "2025-01-09",
+          "PVYield": 178.14,
+          "selfUsePower": 50.7,
+          "ongrid_power": 127.44,
+          "buyPower": 64.64,
+          "use_power": 115.34
+        },
+        {
+          "fecha": "2025-01-10",
+          "PVYield": 225.88,
+          "selfUsePower": 52.63,
+          "ongrid_power": 173.25,
+          "buyPower": 60.94,
+          "use_power": 113.57
+        },
+        {
+          "fecha": "2025-01-11",
+          "PVYield": 33.65,
+          "selfUsePower": 25.33,
+          "ongrid_power": 8.32,
+          "buyPower": 50.39,
+          "use_power": 75.72
+        },
+        {
+          "fecha": "2025-01-12",
+          "PVYield": 89.9,
+          "selfUsePower": 41.9,
+          "ongrid_power": 48.0,
+          "buyPower": 16.33,
+          "use_power": 58.23
+        },
+        {
+          "fecha": "2025-01-13",
+          "PVYield": 191.85,
+          "selfUsePower": 52.41,
+          "ongrid_power": 139.44,
+          "buyPower": 65.03,
+          "use_power": 117.44
+        },
+        {
+          "fecha": "2025-01-14",
+          "PVYield": 205.15,
+          "selfUsePower": 53.31,
+          "ongrid_power": 151.84,
+          "buyPower": 74.87,
+          "use_power": 128.18
+        },
+        {
+          "fecha": "2025-01-15",
+          "PVYield": 196.0,
+          "selfUsePower": 63.02,
+          "ongrid_power": 132.98,
+          "buyPower": 76.54,
+          "use_power": 139.56
+        },
+        {
+          "fecha": "2025-01-16",
+          "PVYield": 155.67,
+          "selfUsePower": 37.48,
+          "ongrid_power": 118.19,
+          "buyPower": 76.22,
+          "use_power": 113.7
+        },
+        {
+          "fecha": "2025-01-17",
+          "PVYield": 190.68,
+          "selfUsePower": 54.74,
+          "ongrid_power": 135.94,
+          "buyPower": 74.9,
+          "use_power": 129.64
+        },
+        {
+          "fecha": "2025-01-18",
+          "PVYield": 260.02,
+          "selfUsePower": 62.73,
+          "ongrid_power": 197.29,
+          "buyPower": 66.87,
+          "use_power": 129.6
+        },
+        {
+          "fecha": "2025-01-19",
+          "PVYield": 205.06,
+          "selfUsePower": 55.31,
+          "ongrid_power": 149.75,
+          "buyPower": 78.07,
+          "use_power": 133.38
+        },
+        {
+          "fecha": "2025-01-20",
+          "PVYield": 230.25,
+          "selfUsePower": 59.44,
+          "ongrid_power": 170.81,
+          "buyPower": 68.09,
+          "use_power": 127.53
+        },
+        {
+          "fecha": "2025-01-21",
+          "PVYield": 238.82,
+          "selfUsePower": 73.91,
+          "ongrid_power": 164.91,
+          "buyPower": 71.68,
+          "use_power": 145.59
+        },
+        {
+          "fecha": "2025-01-22",
+          "PVYield": 249.3,
+          "selfUsePower": 95.21,
+          "ongrid_power": 154.09,
+          "buyPower": 133.13,
+          "use_power": 228.34
+        },
+        {
+          "fecha": "2025-01-23",
+          "PVYield": 213.62,
+          "selfUsePower": 102.67,
+          "ongrid_power": 110.95,
+          "buyPower": 144.11,
+          "use_power": 246.78
+        },
+        {
+          "fecha": "2025-01-24",
+          "PVYield": 161.08,
+          "selfUsePower": 48.61,
+          "ongrid_power": 112.47,
+          "buyPower": 105.65,
+          "use_power": 154.26
+        },
+        {
+          "fecha": "2025-01-25",
+          "PVYield": 150.23,
+          "selfUsePower": 75.72,
+          "ongrid_power": 74.51,
+          "buyPower": 117.1,
+          "use_power": 192.82
+        },
+        {
+          "fecha": "2025-01-26",
+          "PVYield": 121.43,
+          "selfUsePower": 49.24,
+          "ongrid_power": 72.19,
+          "buyPower": 94.41,
+          "use_power": 143.65
+        },
+        {
+          "fecha": "2025-01-27",
+          "PVYield": 177.65,
+          "selfUsePower": 46.87,
+          "ongrid_power": 130.78,
+          "buyPower": 83.74,
+          "use_power": 130.61
+        },
+        {
+          "fecha": "2025-01-28",
+          "PVYield": 198.48,
+          "selfUsePower": 65.41,
+          "ongrid_power": 133.07,
+          "buyPower": 73.82,
+          "use_power": 139.23
+        },
+        {
+          "fecha": "2025-01-29",
+          "PVYield": 196.03,
+          "selfUsePower": 53.53,
+          "ongrid_power": 142.5,
+          "buyPower": 88.11,
+          "use_power": 141.64
+        },
+        {
+          "fecha": "2025-01-30",
+          "PVYield": 194.11,
+          "selfUsePower": 67.89,
+          "ongrid_power": 126.22,
+          "buyPower": 82.83,
+          "use_power": 150.72
+        },
+        {
+          "fecha": "2025-01-31",
+          "PVYield": 144.62,
+          "selfUsePower": 54.93,
+          "ongrid_power": 89.69,
+          "buyPower": 81.28,
+          "use_power": 136.21
+        }
+      ]
+    },
+    "notes": "Extraído de 01.ENERO 2025.pdf · Ciclo Celsia: 2025-01-01 a 2025-01-31 (30 días) · Cuenta 9290482506 · Factura CCCV2320202 · Medidor 2222170715",
+    "fusion_kwh": 3516.4,
+    "difference_kwh": 752.7,
+    "difference_cop": 2545381.0,
+    "status": "critical",
+    "verified_at": "2026-11-09T20:50:11.938659",
+    "gen_kwh": 5246.34,
+    "export_kwh": 3233.21,
+    "import_kwh": 3516.4
+  },
+  {
+    "id": "8788fd1c-44e5-4e04-81d8-ccaa715274be",
+    "created_at": "2026-11-09T21:15:12.527859",
+    "company": "Celsia",
+    "plant_code": "NE=33808116",
+    "plant_name": "LA LECHERÍA",
+    "period": "2025-02",
+    "period_start": "2025-02-01",
+    "period_end": "2025-02-28",
+    "days_billed": 30,
+    "client_name": "PROCOA SAS.",
+    "account_code": "9290482506",
+    "invoice_number": "CCCV2958649",
+    "meter_number": "2222170715",
+    "reading_previous_kwh": null,
+    "reading_current_kwh": null,
+    "multiplier": null,
+    "consumo_importado_cop": 2678221.86,
+    "credito_energia_cop": -1482425.86,
+    "consumo_neto_kwh": 1225.0,
+    "subtotal_active_cop": 1195796.0,
+    "comercializacion_cop": 278957.14,
+    "subsidy_or_contrib_cop": 239159.2,
+    "ajuste_decenas_cop": -2.34,
+    "subtotal_energia_cop": 1713910.0,
+    "otros_cobros_cop": 366920.0,
+    "total_pagar_cop": 2080830.0,
+    "kwh_billed": 2743.63,
+    "price_cop_kwh": 976.16,
+    "c_rate": 183.69,
+    "total_cop": 1713910.0,
+    "componentes_cu": {
+      "G_generacion": 400.22,
+      "C_comercializacion": 183.69,
+      "T_transmision": 56.03,
+      "D_distribucion": 257.74,
+      "PR_perdidas": 74.76,
+      "R_restricciones": 3.72,
+      "cu_calculado": 976.16,
+      "tarifa_excedente_t1_agpe": 792.47
+    },
+    "exc_celsia": 1518.63,
+    "credito_energia_kwh": 1518.63,
+    "audit": {
+      "period_start": "2025-02-01",
+      "period_end": "2025-02-28",
+      "days": 28,
+      "imp_celsia": 2743.63,
+      "imp_fusion": 2366.87,
+      "exc_celsia": 1518.63,
+      "exc_fusion": 2216.89,
+      "gen_fusion": 3704.82,
+      "self_fusion": 1487.93,
+      "load_fusion": 3854.8,
+      "exc_1_kwh": 2216.89,
+      "exc_2_kwh": 0.0,
+      "net_celsia": 1225.0,
+      "net_fusion": 149.98,
+      "cu_rate": 976.16,
+      "c_rate": 183.69,
+      "t1_rate": 792.47,
+      "xm_spot_price": 423.8,
+      "val_neto_celsia": 1195796.0,
+      "val_com_celsia": 278957.14,
+      "val_contrib_celsia": 239159.2,
+      "costo_neto_fusion": 146404.48,
+      "comercializacion_fusion": 407220.52,
+      "contrib_fusion": 29280.9,
+      "remun_exc1_cop": 1756818.82,
+      "remun_exc2_cop": 0.0,
+      "has_contrib": true,
+      "subtotal_celsia": 1713910.0,
+      "subtotal_fusion_creg": 582906.0,
+      "sobrecosto_cop": 1131004.0,
+      "daily_series": [
+        {
+          "fecha": "2025-02-01",
+          "PVYield": 206.55,
+          "selfUsePower": 61.93,
+          "ongrid_power": 144.62,
+          "buyPower": 72.63,
+          "use_power": 134.56
+        },
+        {
+          "fecha": "2025-02-02",
+          "PVYield": 193.42,
+          "selfUsePower": 56.29,
+          "ongrid_power": 137.13,
+          "buyPower": 75.44,
+          "use_power": 131.73
+        },
+        {
+          "fecha": "2025-02-03",
+          "PVYield": 193.42,
+          "selfUsePower": 62.28,
+          "ongrid_power": 131.14,
+          "buyPower": 80.23,
+          "use_power": 142.51
+        },
+        {
+          "fecha": "2025-02-04",
+          "PVYield": 157.69,
+          "selfUsePower": 66.02,
+          "ongrid_power": 91.67,
+          "buyPower": 89.73,
+          "use_power": 155.75
+        },
+        {
+          "fecha": "2025-02-05",
+          "PVYield": 146.69,
+          "selfUsePower": 48.72,
+          "ongrid_power": 97.97,
+          "buyPower": 87.88,
+          "use_power": 136.6
+        },
+        {
+          "fecha": "2025-02-06",
+          "PVYield": 158.26,
+          "selfUsePower": 49.92,
+          "ongrid_power": 108.34,
+          "buyPower": 78.36,
+          "use_power": 128.28
+        },
+        {
+          "fecha": "2025-02-07",
+          "PVYield": 161.02,
+          "selfUsePower": 46.35,
+          "ongrid_power": 114.67,
+          "buyPower": 97.28,
+          "use_power": 143.63
+        },
+        {
+          "fecha": "2025-02-08",
+          "PVYield": 120.3,
+          "selfUsePower": 47.78,
+          "ongrid_power": 72.52,
+          "buyPower": 102.28,
+          "use_power": 150.06
+        },
+        {
+          "fecha": "2025-02-09",
+          "PVYield": 129.15,
+          "selfUsePower": 51.07,
+          "ongrid_power": 78.08,
+          "buyPower": 85.66,
+          "use_power": 136.73
+        },
+        {
+          "fecha": "2025-02-10",
+          "PVYield": 136.9,
+          "selfUsePower": 47.65,
+          "ongrid_power": 89.25,
+          "buyPower": 78.88,
+          "use_power": 126.53
+        },
+        {
+          "fecha": "2025-02-11",
+          "PVYield": 110.73,
+          "selfUsePower": 52.81,
+          "ongrid_power": 57.92,
+          "buyPower": 77.2,
+          "use_power": 130.01
+        },
+        {
+          "fecha": "2025-02-12",
+          "PVYield": 129.39,
+          "selfUsePower": 53.25,
+          "ongrid_power": 76.14,
+          "buyPower": 74.07,
+          "use_power": 127.32
+        },
+        {
+          "fecha": "2025-02-13",
+          "PVYield": 119.66,
+          "selfUsePower": 38.16,
+          "ongrid_power": 81.5,
+          "buyPower": 136.71,
+          "use_power": 174.87
+        },
+        {
+          "fecha": "2025-02-14",
+          "PVYield": 140.17,
+          "selfUsePower": 99.22,
+          "ongrid_power": 40.95,
+          "buyPower": 140.44,
+          "use_power": 239.66
+        },
+        {
+          "fecha": "2025-02-15",
+          "PVYield": 110.77,
+          "selfUsePower": 56.03,
+          "ongrid_power": 54.74,
+          "buyPower": 72.38,
+          "use_power": 128.41
+        },
+        {
+          "fecha": "2025-02-16",
+          "PVYield": 119.2,
+          "selfUsePower": 51.78,
+          "ongrid_power": 67.42,
+          "buyPower": 80.47,
+          "use_power": 132.25
+        },
+        {
+          "fecha": "2025-02-17",
+          "PVYield": 133.54,
+          "selfUsePower": 59.01,
+          "ongrid_power": 74.53,
+          "buyPower": 71.58,
+          "use_power": 130.59
+        },
+        {
+          "fecha": "2025-02-18",
+          "PVYield": 114.63,
+          "selfUsePower": 53.32,
+          "ongrid_power": 61.31,
+          "buyPower": 76.41,
+          "use_power": 129.73
+        },
+        {
+          "fecha": "2025-02-19",
+          "PVYield": 100.83,
+          "selfUsePower": 46.99,
+          "ongrid_power": 53.84,
+          "buyPower": 88.68,
+          "use_power": 135.67
+        },
+        {
+          "fecha": "2025-02-20",
+          "PVYield": 118.42,
+          "selfUsePower": 58.37,
+          "ongrid_power": 60.05,
+          "buyPower": 78.16,
+          "use_power": 136.53
+        },
+        {
+          "fecha": "2025-02-21",
+          "PVYield": 105.83,
+          "selfUsePower": 51.03,
+          "ongrid_power": 54.8,
+          "buyPower": 76.92,
+          "use_power": 127.95
+        },
+        {
+          "fecha": "2025-02-22",
+          "PVYield": 109.87,
+          "selfUsePower": 49.8,
+          "ongrid_power": 60.07,
+          "buyPower": 74.48,
+          "use_power": 124.28
+        },
+        {
+          "fecha": "2025-02-23",
+          "PVYield": 111.98,
+          "selfUsePower": 44.37,
+          "ongrid_power": 67.61,
+          "buyPower": 71.78,
+          "use_power": 116.15
+        },
+        {
+          "fecha": "2025-02-24",
+          "PVYield": 110.88,
+          "selfUsePower": 22.5,
+          "ongrid_power": 88.38,
+          "buyPower": 71.23,
+          "use_power": 93.73
+        },
+        {
+          "fecha": "2025-02-25",
+          "PVYield": 129.82,
+          "selfUsePower": 53.2,
+          "ongrid_power": 76.62,
+          "buyPower": 76.01,
+          "use_power": 129.21
+        },
+        {
+          "fecha": "2025-02-26",
+          "PVYield": 127.82,
+          "selfUsePower": 64.13,
+          "ongrid_power": 63.69,
+          "buyPower": 75.15,
+          "use_power": 139.28
+        },
+        {
+          "fecha": "2025-02-27",
+          "PVYield": 88.95,
+          "selfUsePower": 35.68,
+          "ongrid_power": 53.27,
+          "buyPower": 96.93,
+          "use_power": 132.61
+        },
+        {
+          "fecha": "2025-02-28",
+          "PVYield": 118.93,
+          "selfUsePower": 60.27,
+          "ongrid_power": 58.66,
+          "buyPower": 79.9,
+          "use_power": 140.17
+        }
+      ]
+    },
+    "notes": "Extraído de 02.FEBRERO 2025.pdf · Ciclo Celsia: 2025-02-01 a 2025-02-28 (30 días) · Cuenta 9290482506 · Factura CCCV2958649 · Medidor 2222170715",
+    "fusion_kwh": 2366.87,
+    "difference_kwh": 376.76,
+    "difference_cop": 1131004.0,
+    "status": "critical",
+    "verified_at": "2026-11-09T21:15:15.806410",
+    "gen_kwh": 3704.82,
+    "export_kwh": 2216.89,
+    "import_kwh": 2366.87
+  },
+  {
+    "id": "9bbe2b59-1ac8-40d5-82b0-07f652f50641",
+    "created_at": "2026-11-09T21:36:13.530354",
+    "company": "Celsia",
+    "plant_code": "NE=33808116",
+    "plant_name": "LA LECHERÍA",
+    "period": "2025-03",
+    "period_start": "2025-03-01",
+    "period_end": "2025-03-31",
+    "days_billed": 30,
+    "client_name": "PROCOA SAS",
+    "account_code": "9290482506",
+    "invoice_number": "CCCV3603138",
+    "meter_number": "2222170715",
+    "reading_previous_kwh": null,
+    "reading_current_kwh": null,
+    "multiplier": null,
+    "consumo_importado_cop": 2202093.23,
+    "credito_energia_cop": -1871676.73,
+    "consumo_neto_kwh": 335.21,
+    "subtotal_active_cop": 330416.5,
+    "comercializacion_cop": 336510.65,
+    "subsidy_or_contrib_cop": 66083.3,
+    "ajuste_decenas_cop": 2009.55,
+    "subtotal_energia_cop": 735020.0,
+    "otros_cobros_cop": 302120.0,
+    "total_pagar_cop": 1037140.0,
+    "kwh_billed": 2234.04,
+    "price_cop_kwh": 985.7,
+    "c_rate": 177.22,
+    "total_cop": 735020.0,
+    "componentes_cu": {
+      "G_generacion": 397.77,
+      "C_comercializacion": 177.22,
+      "T_transmision": 49.85,
+      "D_distribucion": 269.92,
+      "PR_perdidas": 72.81,
+      "R_restricciones": 18.13,
+      "cu_calculado": 985.7,
+      "tarifa_excedente_t1_agpe": 808.48
+    },
+    "exc_celsia": 1898.83,
+    "credito_energia_kwh": 1898.83,
+    "audit": {
+      "period_start": "2025-03-01",
+      "period_end": "2025-03-31",
+      "days": 31,
+      "imp_celsia": 2234.04,
+      "imp_fusion": 2176.5,
+      "exc_celsia": 1898.83,
+      "exc_fusion": 1976.98,
+      "gen_fusion": 3499.92,
+      "self_fusion": 1522.94,
+      "load_fusion": 3699.44,
+      "exc_1_kwh": 1976.98,
+      "exc_2_kwh": 0.0,
+      "net_celsia": 335.21,
+      "net_fusion": 199.52,
+      "cu_rate": 985.7,
+      "c_rate": 177.22,
+      "t1_rate": 808.48,
+      "xm_spot_price": 418.92,
+      "val_neto_celsia": 330416.5,
+      "val_com_celsia": 336510.65,
+      "val_contrib_celsia": 66083.3,
+      "costo_neto_fusion": 196666.86,
+      "comercializacion_fusion": 350360.4,
+      "contrib_fusion": 39333.37,
+      "remun_exc1_cop": 1598348.79,
+      "remun_exc2_cop": 0.0,
+      "has_contrib": true,
+      "subtotal_celsia": 735020.0,
+      "subtotal_fusion_creg": 586361.0,
+      "sobrecosto_cop": 148659.0,
+      "daily_series": [
+        {
+          "fecha": "2025-03-01",
+          "PVYield": 131.53,
+          "selfUsePower": 47.23,
+          "ongrid_power": 84.3,
+          "buyPower": 78.29,
+          "use_power": 125.52
+        },
+        {
+          "fecha": "2025-03-02",
+          "PVYield": 161.59,
+          "selfUsePower": 58.34,
+          "ongrid_power": 103.25,
+          "buyPower": 70.09,
+          "use_power": 128.43
+        },
+        {
+          "fecha": "2025-03-03",
+          "PVYield": 147.32,
+          "selfUsePower": 62.78,
+          "ongrid_power": 84.54,
+          "buyPower": 73.54,
+          "use_power": 136.32
+        },
+        {
+          "fecha": "2025-03-04",
+          "PVYield": 67.08,
+          "selfUsePower": 19.85,
+          "ongrid_power": 47.23,
+          "buyPower": 80.16,
+          "use_power": 100.01
+        },
+        {
+          "fecha": "2025-03-05",
+          "PVYield": 89.9,
+          "selfUsePower": 47.04,
+          "ongrid_power": 42.86,
+          "buyPower": 31.34,
+          "use_power": 78.38
+        },
+        {
+          "fecha": "2025-03-06",
+          "PVYield": 96.99,
+          "selfUsePower": 46.64,
+          "ongrid_power": 50.35,
+          "buyPower": 88.06,
+          "use_power": 134.7
+        },
+        {
+          "fecha": "2025-03-07",
+          "PVYield": 104.47,
+          "selfUsePower": 55.34,
+          "ongrid_power": 49.13,
+          "buyPower": 77.77,
+          "use_power": 133.11
+        },
+        {
+          "fecha": "2025-03-08",
+          "PVYield": 117.7,
+          "selfUsePower": 74.02,
+          "ongrid_power": 43.68,
+          "buyPower": 96.77,
+          "use_power": 170.79
+        },
+        {
+          "fecha": "2025-03-09",
+          "PVYield": 91.34,
+          "selfUsePower": 58.38,
+          "ongrid_power": 32.96,
+          "buyPower": 98.83,
+          "use_power": 157.21
+        },
+        {
+          "fecha": "2025-03-10",
+          "PVYield": 121.16,
+          "selfUsePower": 55.56,
+          "ongrid_power": 65.6,
+          "buyPower": 71.51,
+          "use_power": 127.07
+        },
+        {
+          "fecha": "2025-03-11",
+          "PVYield": 105.76,
+          "selfUsePower": 46.59,
+          "ongrid_power": 59.17,
+          "buyPower": 62.32,
+          "use_power": 108.91
+        },
+        {
+          "fecha": "2025-03-12",
+          "PVYield": 0.28,
+          "selfUsePower": 0.28,
+          "ongrid_power": 0.0,
+          "buyPower": 11.12,
+          "use_power": 11.4
+        },
+        {
+          "fecha": "2025-03-13",
+          "PVYield": 118.94,
+          "selfUsePower": 43.59,
+          "ongrid_power": 75.35,
+          "buyPower": 62.48,
+          "use_power": 106.07
+        },
+        {
+          "fecha": "2025-03-14",
+          "PVYield": 103.73,
+          "selfUsePower": 51.15,
+          "ongrid_power": 52.58,
+          "buyPower": 63.18,
+          "use_power": 114.33
+        },
+        {
+          "fecha": "2025-03-15",
+          "PVYield": 164.53,
+          "selfUsePower": 51.03,
+          "ongrid_power": 113.5,
+          "buyPower": 66.39,
+          "use_power": 117.42
+        },
+        {
+          "fecha": "2025-03-16",
+          "PVYield": 102.64,
+          "selfUsePower": 35.66,
+          "ongrid_power": 66.98,
+          "buyPower": 80.08,
+          "use_power": 115.74
+        },
+        {
+          "fecha": "2025-03-17",
+          "PVYield": 127.86,
+          "selfUsePower": 46.52,
+          "ongrid_power": 81.34,
+          "buyPower": 69.07,
+          "use_power": 115.59
+        },
+        {
+          "fecha": "2025-03-18",
+          "PVYield": 91.26,
+          "selfUsePower": 42.16,
+          "ongrid_power": 49.1,
+          "buyPower": 80.78,
+          "use_power": 122.94
+        },
+        {
+          "fecha": "2025-03-19",
+          "PVYield": 137.06,
+          "selfUsePower": 60.53,
+          "ongrid_power": 76.53,
+          "buyPower": 63.61,
+          "use_power": 124.14
+        },
+        {
+          "fecha": "2025-03-20",
+          "PVYield": 108.18,
+          "selfUsePower": 54.56,
+          "ongrid_power": 53.62,
+          "buyPower": 77.18,
+          "use_power": 131.74
+        },
+        {
+          "fecha": "2025-03-21",
+          "PVYield": 134.1,
+          "selfUsePower": 54.45,
+          "ongrid_power": 79.65,
+          "buyPower": 63.25,
+          "use_power": 117.7
+        },
+        {
+          "fecha": "2025-03-22",
+          "PVYield": 169.25,
+          "selfUsePower": 66.74,
+          "ongrid_power": 102.51,
+          "buyPower": 82.77,
+          "use_power": 149.51
+        },
+        {
+          "fecha": "2025-03-23",
+          "PVYield": 115.76,
+          "selfUsePower": 54.34,
+          "ongrid_power": 61.42,
+          "buyPower": 79.5,
+          "use_power": 133.84
+        },
+        {
+          "fecha": "2025-03-24",
+          "PVYield": 103.91,
+          "selfUsePower": 61.2,
+          "ongrid_power": 42.71,
+          "buyPower": 77.85,
+          "use_power": 139.05
+        },
+        {
+          "fecha": "2025-03-25",
+          "PVYield": 116.99,
+          "selfUsePower": 35.68,
+          "ongrid_power": 81.31,
+          "buyPower": 65.09,
+          "use_power": 100.77
+        },
+        {
+          "fecha": "2025-03-26",
+          "PVYield": 108.98,
+          "selfUsePower": 54.57,
+          "ongrid_power": 54.41,
+          "buyPower": 66.45,
+          "use_power": 121.02
+        },
+        {
+          "fecha": "2025-03-27",
+          "PVYield": 101.43,
+          "selfUsePower": 42.93,
+          "ongrid_power": 58.5,
+          "buyPower": 70.98,
+          "use_power": 113.91
+        },
+        {
+          "fecha": "2025-03-28",
+          "PVYield": 126.37,
+          "selfUsePower": 48.48,
+          "ongrid_power": 77.89,
+          "buyPower": 65.56,
+          "use_power": 114.04
+        },
+        {
+          "fecha": "2025-03-29",
+          "PVYield": 113.51,
+          "selfUsePower": 62.67,
+          "ongrid_power": 50.84,
+          "buyPower": 64.94,
+          "use_power": 127.61
+        },
+        {
+          "fecha": "2025-03-30",
+          "PVYield": 81.63,
+          "selfUsePower": 33.14,
+          "ongrid_power": 48.49,
+          "buyPower": 80.27,
+          "use_power": 113.41
+        },
+        {
+          "fecha": "2025-03-31",
+          "PVYield": 138.67,
+          "selfUsePower": 51.49,
+          "ongrid_power": 87.18,
+          "buyPower": 57.27,
+          "use_power": 108.76
+        }
+      ]
+    },
+    "notes": "Extraído de 03.MARZO 2025.pdf · Ciclo Celsia: 2025-03-01 a 2025-03-31 (30 días) · Cuenta 9290482506 · Factura CCCV3603138 · Medidor 2222170715",
+    "fusion_kwh": 2176.5,
+    "difference_kwh": 57.54,
+    "difference_cop": 148659.0,
+    "status": "critical",
+    "verified_at": "2026-11-09T21:36:15.158652",
+    "gen_kwh": 3499.92,
+    "export_kwh": 1976.98,
+    "import_kwh": 2176.5
+  },
+  {
+    "id": "e1ec207c-0d04-41e5-977b-1c3bdb799655",
+    "created_at": "2026-11-09T21:36:44.694848",
+    "company": "Celsia",
+    "plant_code": "NE=33808116",
+    "plant_name": "LA LECHERÍA",
+    "period": "2025-04",
+    "period_start": "2025-04-01",
+    "period_end": "2025-04-30",
+    "days_billed": 30,
+    "client_name": "PROCOA SAS",
+    "account_code": "9290482506",
+    "invoice_number": "CCCV4208408",
+    "meter_number": "2222170715",
+    "reading_previous_kwh": null,
+    "reading_current_kwh": null,
+    "multiplier": null,
+    "consumo_importado_cop": 2276345.61,
+    "credito_energia_cop": -1868955.46,
+    "consumo_neto_kwh": 392.9,
+    "subtotal_active_cop": 407390.15,
+    "comercializacion_cop": 357035.24,
+    "subsidy_or_contrib_cop": 81478.03,
+    "ajuste_decenas_cop": -0.42,
+    "subtotal_energia_cop": 845903.0,
+    "otros_cobros_cop": 311857.0,
+    "total_pagar_cop": 1157760.0,
+    "kwh_billed": 2195.38,
+    "price_cop_kwh": 1036.88,
+    "c_rate": 198.08,
+    "total_cop": 845903.0,
+    "componentes_cu": {
+      "G_generacion": 394.8,
+      "C_comercializacion": 198.08,
+      "T_transmision": 58.19,
+      "D_distribucion": 264.32,
+      "PR_perdidas": 73.73,
+      "R_restricciones": 23.67,
+      "cu_calculado": 1036.88,
+      "tarifa_excedente_t1_agpe": 838.8
+    },
+    "exc_celsia": 1802.48,
+    "credito_energia_kwh": 1802.48,
+    "audit": {
+      "period_start": "2025-04-01",
+      "period_end": "2025-04-30",
+      "days": 30,
+      "imp_celsia": 2195.38,
+      "imp_fusion": 2091.5,
+      "exc_celsia": 1802.48,
+      "exc_fusion": 2016.15,
+      "gen_fusion": 3474.01,
+      "self_fusion": 1457.86,
+      "load_fusion": 3549.36,
+      "exc_1_kwh": 2016.15,
+      "exc_2_kwh": 0.0,
+      "net_celsia": 392.9,
+      "net_fusion": 75.35,
+      "cu_rate": 1036.88,
+      "c_rate": 198.08,
+      "t1_rate": 838.8,
+      "xm_spot_price": 424.04,
+      "val_neto_celsia": 407390.15,
+      "val_com_celsia": 357035.24,
+      "val_contrib_celsia": 81478.03,
+      "costo_neto_fusion": 78128.91,
+      "comercializacion_fusion": 399358.99,
+      "contrib_fusion": 15625.78,
+      "remun_exc1_cop": 1691146.62,
+      "remun_exc2_cop": 0.0,
+      "has_contrib": true,
+      "subtotal_celsia": 845903.0,
+      "subtotal_fusion_creg": 493114.0,
+      "sobrecosto_cop": 352789.0,
+      "daily_series": [
+        {
+          "fecha": "2025-04-01",
+          "PVYield": 114.39,
+          "selfUsePower": 40.54,
+          "ongrid_power": 73.85,
+          "buyPower": 74.55,
+          "use_power": 115.09
+        },
+        {
+          "fecha": "2025-04-02",
+          "PVYield": 131.85,
+          "selfUsePower": 49.12,
+          "ongrid_power": 82.73,
+          "buyPower": 70.36,
+          "use_power": 119.48
+        },
+        {
+          "fecha": "2025-04-03",
+          "PVYield": 96.8,
+          "selfUsePower": 52.14,
+          "ongrid_power": 44.66,
+          "buyPower": 65.91,
+          "use_power": 118.05
+        },
+        {
+          "fecha": "2025-04-04",
+          "PVYield": 63.36,
+          "selfUsePower": 40.01,
+          "ongrid_power": 23.35,
+          "buyPower": 71.2,
+          "use_power": 111.21
+        },
+        {
+          "fecha": "2025-04-05",
+          "PVYield": 108.47,
+          "selfUsePower": 62.19,
+          "ongrid_power": 46.28,
+          "buyPower": 93.44,
+          "use_power": 155.63
+        },
+        {
+          "fecha": "2025-04-06",
+          "PVYield": 91.81,
+          "selfUsePower": 52.99,
+          "ongrid_power": 38.82,
+          "buyPower": 90.98,
+          "use_power": 143.97
+        },
+        {
+          "fecha": "2025-04-07",
+          "PVYield": 59.68,
+          "selfUsePower": 34.22,
+          "ongrid_power": 25.46,
+          "buyPower": 30.63,
+          "use_power": 64.85
+        },
+        {
+          "fecha": "2025-04-08",
+          "PVYield": 91.65,
+          "selfUsePower": 44.64,
+          "ongrid_power": 47.01,
+          "buyPower": 71.8,
+          "use_power": 116.44
+        },
+        {
+          "fecha": "2025-04-09",
+          "PVYield": 98.64,
+          "selfUsePower": 45.1,
+          "ongrid_power": 53.54,
+          "buyPower": 77.16,
+          "use_power": 122.26
+        },
+        {
+          "fecha": "2025-04-10",
+          "PVYield": 96.11,
+          "selfUsePower": 42.72,
+          "ongrid_power": 53.39,
+          "buyPower": 76.56,
+          "use_power": 119.28
+        },
+        {
+          "fecha": "2025-04-11",
+          "PVYield": 95.55,
+          "selfUsePower": 47.78,
+          "ongrid_power": 47.77,
+          "buyPower": 71.71,
+          "use_power": 119.49
+        },
+        {
+          "fecha": "2025-04-12",
+          "PVYield": 122.21,
+          "selfUsePower": 55.81,
+          "ongrid_power": 66.4,
+          "buyPower": 60.04,
+          "use_power": 115.85
+        },
+        {
+          "fecha": "2025-04-13",
+          "PVYield": 118.43,
+          "selfUsePower": 57.0,
+          "ongrid_power": 61.43,
+          "buyPower": 67.39,
+          "use_power": 124.39
+        },
+        {
+          "fecha": "2025-04-14",
+          "PVYield": 103.87,
+          "selfUsePower": 47.37,
+          "ongrid_power": 56.5,
+          "buyPower": 70.62,
+          "use_power": 117.99
+        },
+        {
+          "fecha": "2025-04-15",
+          "PVYield": 99.43,
+          "selfUsePower": 50.59,
+          "ongrid_power": 48.84,
+          "buyPower": 75.11,
+          "use_power": 125.7
+        },
+        {
+          "fecha": "2025-04-16",
+          "PVYield": 114.48,
+          "selfUsePower": 54.15,
+          "ongrid_power": 60.33,
+          "buyPower": 78.38,
+          "use_power": 132.53
+        },
+        {
+          "fecha": "2025-04-17",
+          "PVYield": 133.96,
+          "selfUsePower": 50.24,
+          "ongrid_power": 83.72,
+          "buyPower": 66.59,
+          "use_power": 116.83
+        },
+        {
+          "fecha": "2025-04-18",
+          "PVYield": 119.84,
+          "selfUsePower": 54.65,
+          "ongrid_power": 65.19,
+          "buyPower": 64.69,
+          "use_power": 119.34
+        },
+        {
+          "fecha": "2025-04-19",
+          "PVYield": 123.88,
+          "selfUsePower": 43.77,
+          "ongrid_power": 80.11,
+          "buyPower": 74.32,
+          "use_power": 118.09
+        },
+        {
+          "fecha": "2025-04-20",
+          "PVYield": 108.64,
+          "selfUsePower": 52.56,
+          "ongrid_power": 56.08,
+          "buyPower": 64.93,
+          "use_power": 117.49
+        },
+        {
+          "fecha": "2025-04-21",
+          "PVYield": 166.01,
+          "selfUsePower": 66.04,
+          "ongrid_power": 99.97,
+          "buyPower": 61.77,
+          "use_power": 127.81
+        },
+        {
+          "fecha": "2025-04-22",
+          "PVYield": 179.16,
+          "selfUsePower": 65.29,
+          "ongrid_power": 113.87,
+          "buyPower": 63.04,
+          "use_power": 128.33
+        },
+        {
+          "fecha": "2025-04-23",
+          "PVYield": 162.02,
+          "selfUsePower": 56.03,
+          "ongrid_power": 105.99,
+          "buyPower": 70.8,
+          "use_power": 126.83
+        },
+        {
+          "fecha": "2025-04-24",
+          "PVYield": 164.05,
+          "selfUsePower": 56.76,
+          "ongrid_power": 107.29,
+          "buyPower": 64.14,
+          "use_power": 120.9
+        },
+        {
+          "fecha": "2025-04-25",
+          "PVYield": 151.97,
+          "selfUsePower": 54.2,
+          "ongrid_power": 97.77,
+          "buyPower": 69.5,
+          "use_power": 123.7
+        },
+        {
+          "fecha": "2025-04-26",
+          "PVYield": 127.21,
+          "selfUsePower": 30.24,
+          "ongrid_power": 96.97,
+          "buyPower": 55.66,
+          "use_power": 85.9
+        },
+        {
+          "fecha": "2025-04-27",
+          "PVYield": 79.35,
+          "selfUsePower": 30.31,
+          "ongrid_power": 49.04,
+          "buyPower": 57.99,
+          "use_power": 88.3
+        },
+        {
+          "fecha": "2025-04-28",
+          "PVYield": 101.84,
+          "selfUsePower": 40.75,
+          "ongrid_power": 61.09,
+          "buyPower": 70.94,
+          "use_power": 111.69
+        },
+        {
+          "fecha": "2025-04-29",
+          "PVYield": 166.38,
+          "selfUsePower": 55.78,
+          "ongrid_power": 110.6,
+          "buyPower": 65.32,
+          "use_power": 121.1
+        },
+        {
+          "fecha": "2025-04-30",
+          "PVYield": 82.97,
+          "selfUsePower": 24.87,
+          "ongrid_power": 58.1,
+          "buyPower": 95.97,
+          "use_power": 120.84
+        }
+      ]
+    },
+    "notes": "Extraído de 4.ABRIL 2025.pdf · Ciclo Celsia: 2025-04-01 a 2025-04-30 (30 días) · Cuenta 9290482506 · Factura CCCV4208408 · Medidor 2222170715",
+    "fusion_kwh": 2091.5,
+    "difference_kwh": 103.88,
+    "difference_cop": 352789.0,
+    "status": "critical",
+    "verified_at": "2026-11-09T21:36:47.271429",
+    "gen_kwh": 3474.01,
+    "export_kwh": 2016.15,
+    "import_kwh": 2091.5
+  }
+]

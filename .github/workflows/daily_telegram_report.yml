@@ -55,3 +55,4 @@ jobs:
             analytics/data/processed/*.png
             analytics/data/processed/plants/*.html
           retention-days: 30
+
