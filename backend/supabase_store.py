@@ -826,6 +826,9 @@ def bind_account_code_to_plant(plant_code: str, account_code: str | None, meter_
             "meter_number": str(meter_number or ""),
         }
         ACCOUNT_MAP_FILE.write_text(json.dumps(mapping, indent=2, ensure_ascii=False), encoding="utf-8")
+    except (OSError, PermissionError):
+        # Entornos serverless de solo lectura (como Vercel)
+        pass
     except Exception:
         pass
 

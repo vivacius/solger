@@ -158,12 +158,25 @@ export default function InvoicePage() {
     setAuditingId(inv.id);
     try {
       const r = await fetch(`${BASE}/invoices/${inv.id}/audit`, { method: 'POST' });
+      if (!r.ok) {
+        const text = await r.text();
+        let errMsg = `Error del servidor (${r.status})`;
+        try {
+          const errJson = JSON.parse(text);
+          errMsg = errJson.detail || errJson.message || errMsg;
+        } catch {
+          if (text) errMsg = text.slice(0, 150);
+        }
+        alert(`Error en auditoría: ${errMsg}`);
+        return;
+      }
       const d = await r.json();
       if (d?.success && d.invoice) {
         setInvoices(prev => prev.map(item => item.id === inv.id ? d.invoice : item));
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error auditando factura:', e);
+      alert(`Error en auditoría: ${e?.message || e}`);
     } finally {
       setAuditingId(null);
     }
@@ -1075,6 +1088,18 @@ function NewInvoiceModal({ plants, onClose, onAudited }: {
           total_cop: subtotalEnergiaCOP,
         }),
       });
+      if (!resp.ok) {
+        const text = await resp.text();
+        let errMsg = `Error del servidor (${resp.status})`;
+        try {
+          const errJson = JSON.parse(text);
+          errMsg = errJson.detail || errJson.message || errMsg;
+        } catch {
+          if (text) errMsg = text.slice(0, 150);
+        }
+        alert(`Error en auditoría: ${errMsg}`);
+        return;
+      }
       const data = await resp.json();
       if (data?.success) {
         onAudited();

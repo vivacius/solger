@@ -915,16 +915,20 @@ def audit_invoice(invoice_id: str) -> dict[str, Any]:
     diaria de FusionSolar y precios de bolsa XM, calculando Excedentes Tipo 1 y 2,
     consumo neto y sobrecosto COP.
     """
-    inv = invoice_store.get_invoice(invoice_id)
-    if inv is None:
-        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    try:
+        inv = invoice_store.get_invoice(invoice_id)
+        if inv is None:
+            raise HTTPException(status_code=404, detail="Factura no encontrada")
 
-    plant_info = _get_plant_dict(str(inv.get("plant_code") or ""))
-    audit_data = _run_invoice_creg_audit(inv, plant_info)
-    updated = invoice_store.update_audit(invoice_id, audit_data)
-    if updated is None:
-        raise HTTPException(status_code=500, detail="No se pudo actualizar la auditoría de la factura")
-    return {"success": True, "invoice": updated}
+        plant_info = _get_plant_dict(str(inv.get("plant_code") or ""))
+        audit_data = _run_invoice_creg_audit(inv, plant_info)
+        updated = invoice_store.update_audit(invoice_id, audit_data)
+        return {"success": True, "invoice": updated or inv}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error auditando factura %s: %s", invoice_id, exc)
+        raise HTTPException(status_code=500, detail=f"Error durante el cruce CREG 174: {exc}")
 
 
 @app.post("/api/invoices/audit", tags=["Facturación"])
@@ -933,14 +937,23 @@ def create_and_audit_invoice(body: InvoiceCreate) -> dict[str, Any]:
     Registra una factura y ejecuta automáticamente su auditoría CREG 174 en un solo paso,
     vinculando la cuenta de Celsia a la planta para futuros cruces inmediatos.
     """
-    if body.plant_code and body.account_code:
-        supabase_store.bind_account_code_to_plant(body.plant_code, body.account_code, body.meter_number)
+    try:
+        if body.plant_code and body.account_code:
+            try:
+                supabase_store.bind_account_code_to_plant(body.plant_code, body.account_code, body.meter_number)
+            except Exception:
+                pass
 
-    inv = invoice_store.create_invoice(body.model_dump())
-    plant_info = _get_plant_dict(body.plant_code)
-    audit_data = _run_invoice_creg_audit(inv, plant_info)
-    updated = invoice_store.update_audit(inv["id"], audit_data)
-    return {"success": True, "invoice": updated or inv}
+        inv = invoice_store.create_invoice(body.model_dump())
+        plant_info = _get_plant_dict(body.plant_code)
+        audit_data = _run_invoice_creg_audit(inv, plant_info)
+        updated = invoice_store.update_audit(inv["id"], audit_data)
+        return {"success": True, "invoice": updated or inv}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error registrando y auditando factura: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Error registrando y auditando factura: {exc}")
 
 
 @app.get("/api/invoices/{invoice_id}/report/html", tags=["Facturación"])
