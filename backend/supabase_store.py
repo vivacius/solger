@@ -349,11 +349,61 @@ def sync_invoice_to_supabase(invoice: dict[str, Any]) -> None:
     plant_code = invoice.get("plant_code", "")
     planta_id = uuid_map.get(plant_code)
     if not planta_id:
+        try:
+            org_id = _get_org_id()
+            if org_id and plant_code:
+                r_new = requests.post(
+                    f"{settings.SUPABASE_URL}/rest/v1/planta",
+                    headers=_headers(),
+                    json={
+                        "org_id": org_id,
+                        "fs_plant_code": plant_code,
+                        "nombre": invoice.get("plant_name") or plant_code,
+                        "kwp_dc_nominal": 50.0,
+                        "comercializador": invoice.get("company", "Celsia"),
+                    },
+                    timeout=8,
+                )
+                if r_new.status_code in (200, 201) and r_new.json():
+                    planta_id = r_new.json()[0]["id"]
+                    _PLANT_UUID_CACHE[plant_code] = planta_id
+                    _UUID_PLANT_CACHE[planta_id] = plant_code
+        except Exception:
+            pass
+
+    if not planta_id:
         return
 
     period = str(invoice.get("period") or "2026-10")
     p_start = invoice.get("period_start") or f"{period}-01"
     p_end = invoice.get("period_end") or f"{period}-28"
+
+    comp_cu = dict(invoice.get("componentes_cu") or {})
+    # Empacar metadatos extendidos para que en Serverless (Vercel) no dependa del disco local
+    comp_cu["_extra_meta"] = {
+        "client_name": invoice.get("client_name"),
+        "account_code": invoice.get("account_code"),
+        "invoice_number": invoice.get("invoice_number"),
+        "meter_number": invoice.get("meter_number"),
+        "days_billed": invoice.get("days_billed"),
+        "reading_previous_kwh": invoice.get("reading_previous_kwh"),
+        "reading_current_kwh": invoice.get("reading_current_kwh"),
+        "multiplier": invoice.get("multiplier"),
+        "consumo_importado_cop": invoice.get("consumo_importado_cop"),
+        "credito_energia_cop": invoice.get("credito_energia_cop"),
+        "credito_energia_kwh": invoice.get("credito_energia_kwh"),
+        "consumo_neto_kwh": invoice.get("consumo_neto_kwh"),
+        "subtotal_active_cop": invoice.get("subtotal_active_cop"),
+        "comercializacion_cop": invoice.get("comercializacion_cop"),
+        "subsidy_or_contrib_cop": invoice.get("subsidy_or_contrib_cop"),
+        "ajuste_decenas_cop": invoice.get("ajuste_decenas_cop"),
+        "subtotal_energia_cop": invoice.get("subtotal_energia_cop"),
+        "otros_cobros_cop": invoice.get("otros_cobros_cop"),
+        "total_pagar_cop": invoice.get("total_pagar_cop"),
+        "c_rate": invoice.get("c_rate"),
+        "has_agpe_template": invoice.get("has_agpe_template"),
+        "audit": invoice.get("audit"),
+    }
 
     recibo_payload = {
         "id": invoice["id"],
@@ -362,10 +412,13 @@ def sync_invoice_to_supabase(invoice: dict[str, Any]) -> None:
         "periodo": period,
         "fecha_inicio_ciclo": p_start,
         "fecha_fin_ciclo": p_end,
-        "kwh_neto_facturado": float(invoice.get("kwh_billed") or 0),
+        "import_kwh_facturado": float(invoice.get("kwh_billed") or 0),
+        "export_kwh_facturado": float(invoice.get("credito_energia_kwh") or invoice.get("exc_celsia") or 0),
+        "kwh_neto_facturado": float(invoice.get("consumo_neto_kwh") or invoice.get("kwh_billed") or 0),
         "cu_cop_kwh": float(invoice.get("price_cop_kwh") or 0),
-        "componentes_cu": invoice.get("componentes_cu") or {},
-        "total_cop": float(invoice.get("total_cop") or 0),
+        "componentes_cu": comp_cu,
+        "credito_energia_cop": float(invoice.get("credito_energia_cop") or 0) if invoice.get("credito_energia_cop") is not None else None,
+        "total_cop": float(invoice.get("total_cop") or invoice.get("subtotal_energia_cop") or 0),
         "origen": "ocr" if invoice.get("invoice_number") or invoice.get("account_code") else "manual",
         "notas": invoice.get("notes") or f"Cuenta {invoice.get('account_code', '')} Factura {invoice.get('invoice_number', '')}".strip(),
     }
@@ -377,7 +430,7 @@ def sync_invoice_to_supabase(invoice: dict[str, Any]) -> None:
             json=recibo_payload,
             timeout=12,
         )
-        if r.status_code in (200, 201) and invoice.get("fusion_kwh") is not None:
+        if r.status_code in (200, 201) and (invoice.get("fusion_kwh") is not None or invoice.get("audit") is not None):
             fusion_kwh = float(invoice.get("fusion_kwh") or 0)
             diff_kwh = float(invoice.get("difference_kwh") or 0)
             diff_pct = round(abs(diff_kwh / fusion_kwh * 100), 2) if fusion_kwh > 0 else 0.0
@@ -385,7 +438,7 @@ def sync_invoice_to_supabase(invoice: dict[str, Any]) -> None:
                 "recibo_id": invoice["id"],
                 "gen_fs_kwh": float(invoice.get("gen_kwh") or fusion_kwh),
                 "export_fs_kwh": float(invoice.get("export_kwh") or fusion_kwh),
-                "import_fs_kwh": float(invoice.get("import_kwh") or 0),
+                "import_fs_kwh": float(invoice.get("import_kwh") or fusion_kwh),
                 "dif_kwh": diff_kwh,
                 "dif_pct": diff_pct,
                 "dif_cop": float(invoice.get("difference_cop") or 0),
@@ -400,6 +453,78 @@ def sync_invoice_to_supabase(invoice: dict[str, Any]) -> None:
             )
     except Exception as exc:
         logger.debug("Sincronización de recibo con Supabase omitida: %s", exc)
+
+
+def load_invoices_from_supabase() -> list[dict[str, Any]]:
+    """
+    Lee todas las facturas y conciliaciones persistidas en `solger.recibo` y `solger.conciliacion`.
+    Permite funcionamiento 100% cloud en Vercel Serverless.
+    """
+    if not is_configured():
+        return []
+    try:
+        base = f"{settings.SUPABASE_URL}/rest/v1"
+        r = requests.get(
+            f"{base}/recibo?select=*,planta:planta_id(id,nombre,fs_plant_code),conciliacion:conciliacion(*)&order=periodo.desc",
+            headers=_headers(),
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return []
+        rows = r.json()
+        invoices = []
+        for row in rows:
+            planta = row.get("planta") or {}
+            concil_raw = row.get("conciliacion")
+            concil = concil_raw[0] if isinstance(concil_raw, list) and concil_raw else (concil_raw if isinstance(concil_raw, dict) else {})
+
+            comp_cu = dict(row.get("componentes_cu") or {})
+            extra = comp_cu.pop("_extra_meta", None) or {}
+
+            inv = {
+                "id": str(row["id"]),
+                "company": row.get("comercializador", "Celsia"),
+                "plant_code": planta.get("fs_plant_code", ""),
+                "plant_name": planta.get("nombre", ""),
+                "period": row.get("periodo", ""),
+                "period_start": row.get("fecha_inicio_ciclo"),
+                "period_end": row.get("fecha_fin_ciclo"),
+                "kwh_billed": float(row.get("import_kwh_facturado") or row.get("kwh_neto_facturado") or 0),
+                "price_cop_kwh": float(row.get("cu_cop_kwh") or 0),
+                "total_cop": float(row.get("total_cop") or 0),
+                "notes": row.get("notas", ""),
+                "componentes_cu": comp_cu,
+                "status": concil.get("estado", "pending"),
+                "difference_cop": float(concil.get("dif_cop") or 0),
+                "difference_kwh": float(concil.get("dif_kwh") or 0),
+                "fusion_kwh": float(concil.get("import_fs_kwh") or concil.get("gen_fs_kwh") or 0),
+                "gen_kwh": float(concil.get("gen_fs_kwh") or 0),
+                "export_kwh": float(concil.get("export_fs_kwh") or 0),
+                "import_kwh": float(concil.get("import_fs_kwh") or 0),
+                "verified_at": concil.get("verified_at"),
+                **extra,
+            }
+            invoices.append(inv)
+        return invoices
+    except Exception as exc:
+        logger.error(f"Error loading invoices from Supabase: {exc}")
+        return []
+
+
+def delete_invoice_from_supabase(invoice_id: str) -> bool:
+    """Elimina un recibo en Supabase (la conciliación se elimina en cascada)."""
+    if not is_configured() or not invoice_id:
+        return False
+    try:
+        base = f"{settings.SUPABASE_URL}/rest/v1"
+        r = requests.delete(
+            f"{base}/recibo?id=eq.{invoice_id}",
+            headers=_headers(),
+            timeout=8,
+        )
+        return r.status_code in (200, 204)
+    except Exception:
+        return False
 
 
 def get_monthly_kpi_from_supabase(plant_code: str, month_ym: str | None = None) -> list[dict[str, Any]]:

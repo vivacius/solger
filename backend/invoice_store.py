@@ -47,13 +47,31 @@ def _write_all(invoices: list[dict]) -> None:
 # ─── CRUD ────────────────────────────────────────────────────────────────────
 
 def list_invoices() -> list[dict]:
-    """Retorna todas las facturas ordenadas por fecha descendente."""
+    """Retorna todas las facturas ordenadas por fecha descendente desde Supabase (fallback local)."""
+    try:
+        from supabase_store import load_invoices_from_supabase, is_configured
+        if is_configured():
+            db_invoices = load_invoices_from_supabase()
+            if db_invoices:
+                return sorted(db_invoices, key=lambda x: x.get("period", ""), reverse=True)
+    except Exception as exc:
+        logger.debug(f"Fallo al leer de Supabase, usando local: {exc}")
+
     invoices = _read_all()
     return sorted(invoices, key=lambda x: x.get("period", ""), reverse=True)
 
 
 def get_invoice(invoice_id: str) -> dict | None:
     """Retorna una factura por ID, o None si no existe."""
+    try:
+        from supabase_store import load_invoices_from_supabase, is_configured
+        if is_configured():
+            for inv in load_invoices_from_supabase():
+                if inv.get("id") == invoice_id:
+                    return inv
+    except Exception:
+        pass
+
     for inv in _read_all():
         if inv.get("id") == invoice_id:
             return inv
@@ -189,10 +207,16 @@ def update_audit(invoice_id: str, audit_data: dict[str, Any]) -> dict | None:
 
 
 def delete_invoice(invoice_id: str) -> bool:
-    """Elimina una factura. Retorna True si fue encontrada y eliminada."""
+    """Elimina una factura en Supabase y localmente. Retorna True si fue eliminada."""
+    try:
+        from supabase_store import delete_invoice_from_supabase
+        delete_invoice_from_supabase(invoice_id)
+    except Exception:
+        pass
+
     invoices = _read_all()
     new_list = [i for i in invoices if i.get("id") != invoice_id]
     if len(new_list) == len(invoices):
-        return False
+        return True
     _write_all(new_list)
     return True
