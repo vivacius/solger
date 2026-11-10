@@ -527,6 +527,62 @@ def delete_invoice_from_supabase(invoice_id: str) -> bool:
         return False
 
 
+def get_daily_kpi_for_period(plant_code: str, start_date: str, end_date: str) -> list[dict[str, Any]]:
+    """
+    Lee los registros diarios de una planta desde `solger.kpi_diario` en Supabase
+    para un rango de fechas exacto (ej. 2025-07-01 a 2025-07-31).
+    Evita bloqueos por rate-limit 407 de Huawei FusionSolar.
+    """
+    if not is_configured():
+        return []
+    uuid_map = _ensure_plant_uuids()
+    planta_id = uuid_map.get(plant_code)
+    if not planta_id:
+        return []
+    try:
+        base = f"{settings.SUPABASE_URL}/rest/v1"
+        url = (
+            f"{base}/kpi_diario?planta_id=eq.{planta_id}"
+            f"&fecha=gte.{start_date}&fecha=lte.{end_date}"
+            f"&select=fecha,gen_kwh,export_kwh,import_kwh,autoconsumo_kwh"
+            f"&order=fecha.asc&limit=62"
+        )
+        r = requests.get(url, headers=_headers(), timeout=10)
+        if r.status_code != 200:
+            return []
+        rows = r.json()
+        formatted: list[dict[str, Any]] = []
+        for row in rows:
+            fecha_str = str(row.get("fecha", ""))[:10]
+            if not fecha_str:
+                continue
+            dt = datetime.strptime(fecha_str, "%Y-%m-%d").replace(tzinfo=BOGOTA_TZ)
+            ts_ms = int(dt.timestamp() * 1000)
+            gen = float(row.get("gen_kwh") or 0.0)
+            exp = float(row.get("export_kwh") or 0.0)
+            imp = float(row.get("import_kwh") or 0.0)
+            auto = float(row.get("autoconsumo_kwh") or max(0.0, gen - exp))
+            formatted.append({
+                "stationCode": plant_code,
+                "collectTime": ts_ms,
+                "source": "supabase_solger",
+                "dataItemMap": {
+                    "inverter_power": gen,
+                    "inverterYield": gen,
+                    "PVYield": gen,
+                    "ongrid_power": exp,
+                    "buyPower": imp,
+                    "selfUsePower": auto,
+                    "selfProvide": auto,
+                    "use_power": round(auto + imp, 2),
+                },
+            })
+        return formatted
+    except Exception as exc:
+        logger.debug("Error leyendo kpi diario de Supabase para periodo: %s", exc)
+        return []
+
+
 def get_monthly_kpi_from_supabase(plant_code: str, month_ym: str | None = None) -> list[dict[str, Any]]:
     """
     Lee los registros diarios de una planta directamente desde `solger.kpi_diario` en Supabase.

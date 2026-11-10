@@ -565,35 +565,61 @@ def _run_invoice_creg_audit(inv: dict[str, Any], plant_info: dict[str, Any] | No
     months_to_query = sorted({p_start[:7].replace("-", ""), p_end[:7].replace("-", "")})
     daily_records: list[dict[str, Any]] = []
 
-    for m_str in months_to_query:
-        if not m_str:
-            continue
-        try:
-            m_data = fusion_client.get_station_kpi_month(plant_code, m_str)
-            raw_rows = m_data.get("data") or []
-            if raw_rows:
-                norm = supabase_store.upsert_monthly_kpi_to_supabase(plant_code, raw_rows)
-                for r in norm:
-                    ts = r.get("collectTime")
-                    if ts:
-                        d_str = datetime.fromtimestamp(ts / 1000.0, tz=BOGOTA_TZ).strftime("%Y-%m-%d")
-                        if p_start <= d_str <= p_end:
-                            dim = r.get("dataItemMap") or {}
-                            gen_val = round(float(dim.get("PVYield") or dim.get("inverter_power") or dim.get("inverterYield") or 0.0), 2)
-                            exp_val = round(float(dim.get("ongrid_power") or 0.0), 2)
-                            imp_val = round(float(dim.get("buyPower") or dim.get("buy_power") or 0.0), 2)
-                            auto_val = round(float(dim.get("selfUsePower") or max(0.0, gen_val - exp_val)), 2)
-                            use_val = round(float(dim.get("use_power") or (auto_val + imp_val)), 2)
-                            daily_records.append({
-                                "fecha": d_str,
-                                "PVYield": gen_val,
-                                "selfUsePower": auto_val,
-                                "ongrid_power": exp_val,
-                                "buyPower": imp_val,
-                                "use_power": use_val,
-                            })
-        except Exception as exc:
-            logger.warning("Fallo consultando FusionSolar para %s en %s: %s", plant_code, m_str, exc)
+    # 1. Consultar primero en Supabase (solger.kpi_diario): instantáneo, persistente y sin bloqueos 407
+    try:
+        supa_records = supabase_store.get_daily_kpi_for_period(plant_code, p_start, p_end)
+        for r in supa_records:
+            ts = r.get("collectTime")
+            if ts:
+                d_str = datetime.fromtimestamp(ts / 1000.0, tz=BOGOTA_TZ).strftime("%Y-%m-%d")
+                if p_start <= d_str <= p_end:
+                    dim = r.get("dataItemMap") or {}
+                    gen_val = round(float(dim.get("PVYield") or dim.get("inverter_power") or dim.get("inverterYield") or 0.0), 2)
+                    exp_val = round(float(dim.get("ongrid_power") or 0.0), 2)
+                    imp_val = round(float(dim.get("buyPower") or dim.get("buy_power") or 0.0), 2)
+                    auto_val = round(float(dim.get("selfUsePower") or max(0.0, gen_val - exp_val)), 2)
+                    daily_records.append({
+                        "fecha": d_str,
+                        "PVYield": gen_val,
+                        "selfUsePower": auto_val,
+                        "ongrid_power": exp_val,
+                        "buyPower": imp_val,
+                        "use_power": round(auto_val + imp_val, 2),
+                    })
+    except Exception as exc:
+        logger.debug("Consulta de kpi_diario en Supabase: %s", exc)
+
+    # 2. Si no hay registros suficientes en Supabase, consultar FusionSolar en vivo
+    if len(daily_records) < 20:
+        for m_str in months_to_query:
+            if not m_str:
+                continue
+            try:
+                m_data = fusion_client.get_station_kpi_month(plant_code, m_str)
+                raw_rows = m_data.get("data") or []
+                if raw_rows:
+                    norm = supabase_store.upsert_monthly_kpi_to_supabase(plant_code, raw_rows)
+                    for r in norm:
+                        ts = r.get("collectTime")
+                        if ts:
+                            d_str = datetime.fromtimestamp(ts / 1000.0, tz=BOGOTA_TZ).strftime("%Y-%m-%d")
+                            if p_start <= d_str <= p_end:
+                                dim = r.get("dataItemMap") or {}
+                                gen_val = round(float(dim.get("PVYield") or dim.get("inverter_power") or dim.get("inverterYield") or 0.0), 2)
+                                exp_val = round(float(dim.get("ongrid_power") or 0.0), 2)
+                                imp_val = round(float(dim.get("buyPower") or dim.get("buy_power") or 0.0), 2)
+                                auto_val = round(float(dim.get("selfUsePower") or max(0.0, gen_val - exp_val)), 2)
+                                use_val = round(float(dim.get("use_power") or (auto_val + imp_val)), 2)
+                                daily_records.append({
+                                    "fecha": d_str,
+                                    "PVYield": gen_val,
+                                    "selfUsePower": auto_val,
+                                    "ongrid_power": exp_val,
+                                    "buyPower": imp_val,
+                                    "use_power": use_val,
+                                })
+            except Exception as exc:
+                logger.warning("Fallo consultando FusionSolar para %s en %s: %s", plant_code, m_str, exc)
 
     if not daily_records:
         try:
