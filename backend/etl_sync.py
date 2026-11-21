@@ -33,7 +33,11 @@ def run_hourly_etl_and_alerts() -> dict:
     now_cot = datetime.now(BOGOTA_TZ)
     print(f"[ETL SOLGER] Iniciando sincronización — {now_cot.strftime('%Y-%m-%d %H:%M:%S COT')}")
 
-    summary_resp = backend_main.get_portfolio_summary()
+    summary_resp = backend_main.get_portfolio_summary(force=True)
+    try:
+        backend_main.get_alerts(force=True)
+    except Exception as exc:
+        print(f"[ETL SOLGER] Aviso actualizando alertas en Supabase: {exc}")
     anom_resp = backend_main.get_portfolio_anomalies()
 
     plants = summary_resp.get("plants", [])
@@ -65,21 +69,26 @@ def run_hourly_etl_and_alerts() -> dict:
             except Exception as exc:
                 print(f"[ETL SOLGER] Error guardando KPI de hoy para {pcode}: {exc}")
 
-    # 2. Sincronizar el mes actual directo desde FusionSolar (sin atajo de caché) para cerrar días pasados
-    current_ym = now_cot.strftime("%Y%m")
-    for idx, p in enumerate(plants):
-        pcode = p.get("plantCode")
-        if not pcode:
-            continue
-        try:
-            m_data = fusion_client.get_station_kpi_month(pcode, current_ym)
-            raw_rows = m_data.get("data") or []
-            if raw_rows:
-                supabase_store.upsert_monthly_kpi_to_supabase(pcode, raw_rows)
-        except Exception as exc:
-            print(f"[ETL SOLGER] Aviso en mes actual {pcode}: {exc}")
-        if idx < len(plants) - 1:
-            time.sleep(1.8)
+    # 2. Sincronizar histórico del mes actual máximo cada 6 horas (ahorra llamadas 407 en ciclos de 15m)
+    _, month_backfill_fresh = supabase_store.get_kv_cache("etl_last_monthly_backfill", max_age_sec=21600)
+    if not month_backfill_fresh:
+        current_ym = now_cot.strftime("%Y%m")
+        for idx, p in enumerate(plants):
+            pcode = p.get("plantCode")
+            if not pcode:
+                continue
+            try:
+                m_data = fusion_client.get_station_kpi_month(pcode, current_ym)
+                raw_rows = m_data.get("data") or []
+                if raw_rows:
+                    supabase_store.upsert_monthly_kpi_to_supabase(pcode, raw_rows)
+            except Exception as exc:
+                print(f"[ETL SOLGER] Aviso en mes actual {pcode}: {exc}")
+                if "407" in str(exc):
+                    break
+            if idx < len(plants) - 1:
+                time.sleep(1.8)
+        supabase_store.set_kv_cache("etl_last_monthly_backfill", {"ts": now_cot.isoformat()})
 
     # 3. Actualizar resumen de strings PV en Supabase para Mantenimiento y Vercel
     try:

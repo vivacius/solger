@@ -99,16 +99,24 @@ def get_plants() -> dict[str, Any]:
 
 
 @app.get("/api/plants/summary", tags=["Plantas"])
-def get_portfolio_summary() -> dict[str, Any]:
+def get_portfolio_summary(force: bool = Query(default=False)) -> dict[str, Any]:
     """
-    KPIs globales del portafolio completo.
+    KPIs globales del portafolio completo (Supabase-first para velocidad y tolerancia a 407).
     Usa el mapeo oficial de Huawei Northbound:
         real_health_state: 1 = Offline, 2 = Falla/Alarma, 3 = Operativa (Healthy)
     """
+    cot_hour = datetime.now(BOGOTA_TZ).hour
+    ttl_sec = 7200 if (cot_hour >= 19 or cot_hour < 6) else 1200
+    cached_summary, is_fresh = supabase_store.get_kv_cache("portfolio_summary_snapshot", max_age_sec=ttl_sec)
+    if not force and cached_summary and is_fresh and cached_summary.get("plants"):
+        return cached_summary
+
     try:
         plants_data = fusion_client.get_plant_list()
         raw_plants = plants_data.get("data", {}).get("list", [])
         if not raw_plants:
+            if cached_summary and cached_summary.get("plants"):
+                return {**cached_summary, "source": "supabase_snapshot"}
             raise HTTPException(status_code=404, detail="No se encontraron plantas.")
 
         plants = supabase_store.auto_sync_plants(raw_plants)
@@ -139,8 +147,9 @@ def get_portfolio_summary() -> dict[str, Any]:
             p["satelliteGhi_kWh_m2"] = psat["ghi_today_kwh_m2"]
             p["cloudCover_pct"] = psat["cloud_cover_pct"]
 
-        return {
+        res = {
             "success": True,
+            "source": "fusionsolar_live",
             "lastUpdated": datetime.now(BOGOTA_TZ).isoformat(),
             "summary": {
                 "totalCapacity_kWp": round(total_capacity, 2),
@@ -157,9 +166,14 @@ def get_portfolio_summary() -> dict[str, Any]:
             "plants": plants,
             "kpis": kpi_list,
         }
+        supabase_store.set_kv_cache("portfolio_summary_snapshot", res)
+        return res
     except HTTPException:
         raise
     except Exception as exc:
+        if cached_summary and cached_summary.get("plants"):
+            logger.warning("Usando snapshot Supabase de portfolio_summary ante error: %s", exc)
+            return {**cached_summary, "source": "supabase_snapshot"}
         _handle_fusion_errors(exc)
 
 
@@ -208,17 +222,27 @@ def get_plant_kpi_day(
         default=None,
         description="Fecha en formato YYYYMMDD. Si no se especifica, usa hoy (hora Bogotá).",
     ),
+    force: bool = Query(default=False),
 ) -> dict[str, Any]:
     """
-    KPI por hora de una planta en un día específico.
+    KPI por hora de una planta en un día específico (Supabase-first en `sync_cursor`).
     Si FusionSolar está en enfriamiento 407 o no reporta puntos horarios de hoy,
     construye la curva horaria solar a partir de la energía real del día (`day_power`).
     """
     decoded_code = plant_code.replace("__", "=")
+    today_str = datetime.now(BOGOTA_TZ).strftime("%Y%m%d")
     if not date or not isinstance(date, str):
-        date = datetime.now(BOGOTA_TZ).strftime("%Y%m%d")
+        date = today_str
+
+    kv_key = f"plant_kpi_day_{decoded_code}_{date}"
+    cot_hour = datetime.now(BOGOTA_TZ).hour
+    ttl_sec = (86400 * 7) if date != today_str else (7200 if (cot_hour >= 19 or cot_hour < 6) else 900)
+    cached_day, is_fresh = supabase_store.get_kv_cache(kv_key, max_age_sec=ttl_sec)
+    if not force and cached_day and is_fresh and cached_day.get("data"):
+        return cached_day
 
     rows: list[dict[str, Any]] = []
+    has_nonzero = False
     try:
         data = fusion_client.get_station_kpi_day(decoded_code, date)
         raw_rows = data.get("data", []) or []
@@ -232,6 +256,9 @@ def get_plant_kpi_day(
         logger.debug("Fallback horario para %s (%s): %s", decoded_code, date, exc)
 
     if not rows:
+        if cached_day and cached_day.get("data"):
+            return {**cached_day, "source": "supabase_snapshot"}
+
         day_p = 0.0
         exp_p = 0.0
         use_p = 0.0
@@ -256,12 +283,16 @@ def get_plant_kpi_day(
             month_power=month_p,
         )
 
-    return {
+    res = {
         "success": True,
         "plantCode": decoded_code,
         "date": date,
+        "source": "fusionsolar_live" if has_nonzero else "synthesized_fallback",
         "data": rows,
     }
+    if has_nonzero:
+        supabase_store.set_kv_cache(kv_key, res)
+    return res
 
 
 @app.get("/api/plants/{plant_code}/kpi/month", tags=["Plantas"])
@@ -817,11 +848,18 @@ def _enrich_alarm_intelligence(
 
 
 @app.get("/api/alerts", tags=["Alarmas"])
-def get_alerts() -> dict[str, Any]:
+def get_alerts(force: bool = Query(default=False)) -> dict[str, Any]:
     """
-    Alarmas activas de todas las plantas, incluyendo estados de comunicación offline.
+    Alarmas activas de todas las plantas (Supabase-first en `sync_cursor`),
+    incluyendo estados de comunicación offline.
     Mapeo oficial Huawei: 1 = Offline (Desconectada), 2 = Falla/Alarma, 3 = Operativa.
     """
+    cot_hour = datetime.now(BOGOTA_TZ).hour
+    ttl_sec = 7200 if (cot_hour >= 19 or cot_hour < 6) else 900
+    cached_alerts, is_fresh = supabase_store.get_kv_cache("portfolio_alerts_snapshot", max_age_sec=ttl_sec)
+    if not force and cached_alerts and is_fresh:
+        return cached_alerts
+
     try:
         plants_data = fusion_client.get_plant_list()
         plants = plants_data.get("data", {}).get("list", [])
@@ -905,12 +943,18 @@ def get_alerts() -> dict[str, Any]:
                         "raiseTime": now_ms,
                     })
 
-        return {
+        res = {
             "success": True,
+            "source": "fusionsolar_live",
             "total": len(formatted_alarms),
             "alarms": formatted_alarms,
         }
+        supabase_store.set_kv_cache("portfolio_alerts_snapshot", res)
+        return res
     except Exception as exc:
+        if cached_alerts is not None:
+            logger.warning("Usando snapshot Supabase de portfolio_alerts ante error: %s", exc)
+            return {**cached_alerts, "source": "supabase_snapshot"}
         _handle_fusion_errors(exc)
 
 
