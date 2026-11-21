@@ -35,12 +35,12 @@ jobs:
 
       - name: Generar Reporte Ejecutivo + Plantas y Enviar por Telegram
         env:
-          FUSIONSOLAR_BASE_URL: ${{ secrets.FUSIONSOLAR_BASE_URL || 'https://la5.fusionsolar.huawei.com' }}
-          FUSIONSOLAR_USERNAME: ${{ secrets.FUSIONSOLAR_USERNAME || 'SOLGER' }}
-          FUSIONSOLAR_PASSWORD: ${{ secrets.FUSIONSOLAR_PASSWORD || 'Solar2022' }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || '9182298648:AAEWdyYWNsxS3bdvzFqo__ZhFKxR69V_nbk' }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || '5475150163' }}
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://cugajlobgbwnvhvtqnxw.supabase.co' }}
+          FUSIONSOLAR_BASE_URL: ${{ secrets.FUSIONSOLAR_BASE_URL }}
+          FUSIONSOLAR_USERNAME: ${{ secrets.FUSIONSOLAR_USERNAME }}
+          FUSIONSOLAR_PASSWORD: ${{ secrets.FUSIONSOLAR_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           python analytics/report_generator.py

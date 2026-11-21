@@ -1,9 +1,11 @@
-name: Sincronización de Base de Datos cada 2 Horas (24/7)
+name: Sincronización de Base de Datos cada 15 Minutos (Ventana Solar)
 
 on:
   schedule:
-    # Ejecuta cada 2 horas todos los días (00:00, 02:00, 04:00 ... 22:00 UTC)
-    - cron: '0 */2 * * *'
+    # Cada 15 minutos en ventana solar (11:00–23:59 UTC = 06:00–18:59 Hora Colombia, UTC-5)
+    - cron: '*/15 11-23 * * *'
+    # Revisión nocturna única a las 23:00 COT (04:00 UTC)
+    - cron: '0 4 * * *'
   workflow_dispatch:
 
 jobs:
@@ -28,12 +30,12 @@ jobs:
 
       - name: Ejecutar ETL y Verificación de Ventana Solar
         env:
-          FUSIONSOLAR_BASE_URL: ${{ secrets.FUSIONSOLAR_BASE_URL || 'https://la5.fusionsolar.huawei.com' }}
-          FUSIONSOLAR_USERNAME: ${{ secrets.FUSIONSOLAR_USERNAME || 'SOLGER' }}
-          FUSIONSOLAR_PASSWORD: ${{ secrets.FUSIONSOLAR_PASSWORD || 'Solar2022' }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || '9182298648:AAEWdyYWNsxS3bdvzFqo__ZhFKxR69V_nbk' }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || '5475150163' }}
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://cugajlobgbwnvhvtqnxw.supabase.co' }}
+          FUSIONSOLAR_BASE_URL: ${{ secrets.FUSIONSOLAR_BASE_URL }}
+          FUSIONSOLAR_USERNAME: ${{ secrets.FUSIONSOLAR_USERNAME }}
+          FUSIONSOLAR_PASSWORD: ${{ secrets.FUSIONSOLAR_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           python backend/etl_sync.py
