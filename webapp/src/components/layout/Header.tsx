@@ -4,17 +4,17 @@ import { BRAND } from '../../lib/utils';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 
-const NAV_ITEMS = [
+const NAV_ITEMS: Array<{ to: string; label: string; badge?: boolean; hidden?: boolean }> = [
   { to: '/',              label: 'Dashboard' },
   { to: '/plantas',       label: 'Plantas'   },
   { to: '/mapa',          label: 'Mapa'      },
   { to: '/alertas',       label: 'Alertas', badge: true },
-  { to: '/comparar',      label: 'Comparar'  },
+  { to: '/comparar',      label: 'Comparar', hidden: true },
   { to: '/mantenimiento', label: 'Mantenimiento' },
   { to: '/mercado',       label: 'Mercado'   },
   { to: '/facturacion',   label: 'Facturación' },
   { to: '/reportes',      label: 'Reportes'  },
-];
+].filter(item => !item.hidden);
 
 function fmtHeaderDate(): string {
   return new Date().toLocaleDateString('es-CO', {

@@ -103,3 +103,81 @@ def get_satellite_irradiance(lat: float | None = None, lon: float | None = None)
     _SAT_CACHE[cache_key] = (now, fallback)
     return fallback
 
+
+_GRID_CACHE: tuple[float, dict[str, Any]] | None = None
+_GRID_TTL_SECONDS = 1800  # 30 minutos
+
+
+def get_irradiance_grid() -> dict[str, Any]:
+    """
+    Obtiene una malla geográfica 5x5 de irradiancia horaria (W/m²) y nubosidad (%)
+    sobre el Valle del Cauca desde Open-Meteo en una sola petición HTTP.
+    """
+    global _GRID_CACHE
+    now = time.time()
+    if _GRID_CACHE and (now - _GRID_CACHE[0]) < _GRID_TTL_SECONDS:
+        return _GRID_CACHE[1]
+
+    lat_steps = [round(3.15 + i * 0.25, 2) for i in range(5)]  # 3.15 .. 4.15
+    lon_steps = [round(-76.65 + j * 0.14, 2) for j in range(5)]  # -76.65 .. -76.09
+    coords = [(la, lo) for la in lat_steps for lo in lon_steps]
+
+    lats_param = ",".join(str(c[0]) for c in coords)
+    lons_param = ",".join(str(c[1]) for c in coords)
+
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lats_param}&longitude={lons_param}"
+        "&hourly=shortwave_radiation,cloud_cover"
+        "&forecast_days=1&timezone=America%2FBogota"
+    )
+    try:
+        r = requests.get(url, timeout=8)
+        if r.status_code == 200:
+            payload = r.json()
+            items = payload if isinstance(payload, list) else [payload]
+            raw_times = (items[0].get("hourly") or {}).get("time") or []
+            # Filtrar horas solares (06:00 a 18:00)
+            solar_indices = [
+                idx for idx, t in enumerate(raw_times)
+                if len(t) >= 13 and 6 <= int(t[11:13]) <= 18
+            ]
+            if not solar_indices:
+                solar_indices = list(range(len(raw_times)))
+
+            times = [raw_times[idx][11:16] for idx in solar_indices]
+            points = []
+            for idx, item in enumerate(items):
+                if idx >= len(coords):
+                    break
+                h = item.get("hourly") or {}
+                rads = h.get("shortwave_radiation") or []
+                clouds = h.get("cloud_cover") or []
+                points.append({
+                    "lat": coords[idx][0],
+                    "lon": coords[idx][1],
+                    "radiation": [round(float(rads[i] or 0.0), 0) if i < len(rads) else 0 for i in solar_indices],
+                    "cloud": [round(float(clouds[i] or 0.0), 0) if i < len(clouds) else 0 for i in solar_indices],
+                })
+
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            now_hour = datetime.now(ZoneInfo("America/Bogota")).strftime("%H:00")
+            default_idx = times.index(now_hour) if now_hour in times else max(0, len(times) // 2)
+
+            result = {
+                "source": "open_meteo_grid",
+                "times": times,
+                "defaultIndex": default_idx,
+                "dLat": 0.25,
+                "dLon": 0.14,
+                "points": points,
+            }
+            _GRID_CACHE = (now, result)
+            return result
+    except Exception as exc:
+        logger.debug("Error consultando malla de irradiancia Open-Meteo: %s", exc)
+
+    return {"source": "unavailable", "times": [], "defaultIndex": 0, "dLat": 0.25, "dLon": 0.14, "points": []}
+
+

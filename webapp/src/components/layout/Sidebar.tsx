@@ -13,17 +13,17 @@ import {
 } from 'lucide-react';
 import { useSidebar } from './Layout';
 
-const NAV_MAIN = [
+const NAV_MAIN: Array<{ to: string; icon: any; label: string; badge?: boolean; hidden?: boolean }> = [
   { to: '/',               icon: LayoutDashboard, label: 'Dashboard'      },
   { to: '/plantas',        icon: Zap,             label: 'Plantas'        },
   { to: '/mapa',           icon: Map,             label: 'Mapa'           },
   { to: '/alertas',        icon: Bell,            label: 'Alertas',  badge: true },
-  { to: '/comparar',       icon: BarChart3,       label: 'Comparar'      },
+  { to: '/comparar',       icon: BarChart3,       label: 'Comparar', hidden: true },
   { to: '/mantenimiento',  icon: Wrench,          label: 'Mantenimiento'  },
   { to: '/mercado',        icon: TrendingUp,      label: 'Mercado XM'    },
   { to: '/facturacion',    icon: Receipt,         label: 'Facturación'   },
   { to: '/reportes',       icon: FileSpreadsheet, label: 'Reportes'      },
-];
+].filter(item => !item.hidden);
 
 export function Sidebar() {
   const location = useLocation();

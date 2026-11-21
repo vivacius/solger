@@ -11,17 +11,17 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 
-const NAV_ITEMS = [
+const NAV_ITEMS: Array<{ to: string; icon: any; label: string; badge?: boolean; hidden?: boolean }> = [
   { to: '/',               icon: LayoutDashboard, label: 'Inicio'   },
   { to: '/plantas',        icon: Zap,             label: 'Plantas'  },
   { to: '/mapa',           icon: Map,             label: 'Mapa'     },
   { to: '/alertas',        icon: Bell,            label: 'Alertas', badge: true },
-  { to: '/comparar',       icon: BarChart3,       label: 'Comparar' },
+  { to: '/comparar',       icon: BarChart3,       label: 'Comparar', hidden: true },
   { to: '/mantenimiento',  icon: Wrench,          label: 'Mant.'    },
   { to: '/mercado',        icon: TrendingUp,      label: 'Mercado'  },
   { to: '/facturacion',    icon: FileText,        label: 'Factura'  },
   { to: '/reportes',       icon: FileSpreadsheet, label: 'Reportes' },
-];
+].filter(item => !item.hidden);
 
 export function BottomNav() {
   const location = useLocation();

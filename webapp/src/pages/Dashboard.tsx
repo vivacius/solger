@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Zap, Sun, Leaf, TrendingUp, Activity, Building2, Search, Filter } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell, PieChart, Pie, Legend
+  ResponsiveContainer, Cell, LabelList, LineChart, Line, ReferenceLine
 } from 'recharts';
 import { Link } from 'react-router-dom';
 
@@ -16,67 +16,180 @@ import { Header } from '../components/layout/Header';
 
 const POLL = 5 * 60 * 1000;
 
-const PIE_COLORS = ['#58AE32','#24A5AE','#F5B914','#3D8A1F','#1A8A92','#D4A10A','#7AC94E','#5BC2CB','#8BC34A','#2196F3'];
+type RangeStatus = 'optimal' | 'warning' | 'critical' | 'nodata';
+
+const RANGE_META: Record<RangeStatus, { color: string; label: string; bg: string }> = {
+  optimal: { color: '#58AE32', label: 'En rango (≥85%)', bg: 'rgba(88,174,50,0.10)' },
+  warning: { color: '#F59E0B', label: 'Bajo rango (65–85%)', bg: 'rgba(245,158,11,0.12)' },
+  critical: { color: '#EF4444', label: 'Fuera de rango (<65%)', bg: 'rgba(239,68,68,0.10)' },
+  nodata: { color: '#94A3B8', label: 'Sin datos / Nocturno', bg: 'rgba(148,163,184,0.12)' },
+};
+
+interface BarItem {
+  plantCode: string;
+  name: string;
+  fullName: string;
+  energy: number;
+  capacity: number;
+  yf: number | null;
+  pctOfExpected: number | null;
+  health: number;
+  rangeStatus: RangeStatus;
+  kwhLost: number;
+  copLost: number;
+}
 
 /* ── Custom Tooltip ────────────────────────────────────────────── */
-function BarTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: { fullName: string; energy: number; health: number } }> }) {
+function BarTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: BarItem }> }) {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
   const hi = healthInfo(d.health);
+  const rm = RANGE_META[d.rangeStatus];
+  const diffPct = d.pctOfExpected != null ? Math.round(d.pctOfExpected - 100) : null;
+
   return (
     <div style={{
       background: '#fff',
       border: '1px solid rgba(15,23,42,0.09)',
       borderRadius: 10,
-      padding: '8px 12px',
-      boxShadow: '0 6px 16px rgba(15,23,42,0.08)',
-      minWidth: 160,
+      padding: '10px 13px',
+      boxShadow: '0 6px 18px rgba(15,23,42,0.10)',
+      minWidth: 195,
     }}>
-      <p style={{ fontSize: 11.5, fontWeight: 700, color: '#172033', marginBottom: 4 }}>{d.fullName}</p>
-      <p style={{ fontSize: 18, fontWeight: 800, color: '#172033', letterSpacing: '-0.03em', fontFamily: 'Inter, sans-serif' }}>
+      <p style={{ fontSize: 12, fontWeight: 700, color: '#172033', marginBottom: 4 }}>{d.fullName}</p>
+      <p style={{ fontSize: 18, fontWeight: 800, color: '#172033', letterSpacing: '-0.03em', fontFamily: 'Inter, sans-serif', margin: 0 }}>
         {fmt(d.energy, 1)} <span style={{ fontSize: 11, fontWeight: 500, color: '#64748B' }}>kWh</span>
       </p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: hi.color, display: 'inline-block' }} />
-        <span style={{ fontSize: 10.5, color: '#64748B' }}>{hi.label}</span>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(15,23,42,0.06)' }}>
+        {d.yf != null && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#475569' }}>
+            <span>Rendimiento (Yf):</span>
+            <strong style={{ color: '#0F172A' }}>{d.yf.toFixed(2)} kWh/kWp</strong>
+          </div>
+        )}
+        {diffPct != null && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#475569' }}>
+            <span>Vs. rango horario:</span>
+            <strong style={{ color: rm.color }}>{diffPct >= 0 ? `+${diffPct}%` : `${diffPct}%`}</strong>
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: '#64748B' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: hi.color, display: 'inline-block' }} />
+            {hi.label}
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: rm.bg, color: rm.color }}>
+            {rm.label.split(' ')[0]} {rm.label.split(' ')[1]}
+          </span>
+        </div>
       </div>
     </div>
   );
 }
 
 const STATUS_OPTS = [
-  { value: 'all',  label: 'Todos'     },
-  { value: '3',    label: 'Operativa' },
-  { value: '2',    label: 'En alarma' },
-  { value: '1',    label: 'Offline'   },
-  { value: '0',    label: 'Sin datos' },
+  { value: 'all', label: 'Todos' },
+  { value: '3', label: 'Operativa' },
+  { value: '2', label: 'En alarma' },
+  { value: '1', label: 'Offline' },
+  { value: '0', label: 'Sin datos' },
 ];
 
 export default function Dashboard() {
   const { data, loading, error, refresh } = useFetch(api.getSummary, [], { refreshInterval: POLL });
+  const { data: anomaliesData } = useFetch(api.getAnomalies, [], { refreshInterval: POLL });
+  const { data: dailyData } = useFetch(() => api.getPortfolioDaily(30), [], { refreshInterval: POLL });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  const barData = useMemo(() => {
+  const barData: BarItem[] = useMemo(() => {
     if (!data) return [];
-    return data.plants.map(p => {
+
+    const anomMap = new Map(
+      (anomaliesData?.evaluations ?? []).map(ev => [ev.plant_code, ev])
+    );
+
+    // 1. Calcular Yf (kWh / kWp) de plantas operativas con capacidad > 0 para obtener la mediana horaria del portafolio
+    const rawItems = data.plants.map(p => {
       const kpi = data.kpis.find(k => k.plantCode === p.plantCode || k.stationCode === p.plantCode);
+      const energy = +(kpi?.dataItemMap?.day_power ?? 0).toFixed(1);
+      const health = kpi?.dataItemMap?.real_health_state ?? 0;
+      const capacity = p.capacity ?? 0;
+      const yf = capacity > 0 ? +(energy / capacity).toFixed(3) : null;
+      return { plant: p, energy, health, capacity, yf, anom: anomMap.get(p.plantCode) };
+    });
+
+    const activeYfs = rawItems
+      .filter(i => i.health === 3 && i.yf != null && i.energy > 0.5)
+      .map(i => i.yf as number)
+      .sort((a, b) => a - b);
+
+    const medianYf = activeYfs.length > 0
+      ? activeYfs[Math.floor(activeYfs.length / 2)]
+      : 0;
+
+    // 2. Clasificar cada planta según su posición frente al rango esperado a la hora actual
+    return rawItems.map(({ plant, energy, health, capacity, yf, anom }): BarItem => {
+      let pctOfExpected: number | null = null;
+      if (anom?.ratio_pares != null && anom.ratio_pares > 0) {
+        pctOfExpected = +(anom.ratio_pares * 100).toFixed(1);
+      } else if (yf != null && medianYf > 0.05) {
+        pctOfExpected = +((yf / medianYf) * 100).toFixed(1);
+      }
+
+      let rangeStatus: RangeStatus = 'nodata';
+      if (health === 1) {
+        rangeStatus = 'critical';
+      } else if (medianYf <= 0.05 && energy === 0) {
+        rangeStatus = 'nodata';
+      } else if (pctOfExpected != null) {
+        if (pctOfExpected >= 85 && health === 3) rangeStatus = 'optimal';
+        else if (pctOfExpected >= 65) rangeStatus = 'warning';
+        else rangeStatus = 'critical';
+      } else if (health === 3 && energy > 0) {
+        rangeStatus = 'optimal';
+      } else if (health === 2) {
+        rangeStatus = 'warning';
+      }
+
       return {
-        name: p.plantName.replace(/^HDA\s+|^HACIENDA\s+/i, '').slice(0, 10),
-        fullName: p.plantName,
-        energy: +(kpi?.dataItemMap?.day_power ?? 0).toFixed(1),
-        health: kpi?.dataItemMap?.real_health_state ?? 0,
+        plantCode: plant.plantCode,
+        name: plant.plantName
+          .replace(/^HDA\s+|^HACIENDA\s+/i, '')
+          .replace(/\s*POZO\s*/i, ' P')
+          .slice(0, 12),
+        fullName: plant.plantName,
+        energy,
+        capacity,
+        yf,
+        pctOfExpected,
+        health,
+        rangeStatus,
+        kwhLost: anom?.kwh_perdidos ?? 0,
+        copLost: anom?.cop_perdidos ?? 0,
       };
     }).sort((a, b) => b.energy - a.energy);
-  }, [data]);
+  }, [data, anomaliesData]);
 
-  const pieData = useMemo(() => {
-    if (!data) return [];
-    return data.plants.filter(p => p.capacity > 0).map(p => ({
-      name: p.plantName.replace(/^HDA\s+|^HACIENDA\s+/i, '').slice(0, 16),
-      value: p.capacity,
-    }));
-  }, [data]);
+  // Serie diaria del portafolio (últimos 30 días)
+  const { dailySeries, dailyAvg } = useMemo(() => {
+    const raw = dailyData?.series ?? [];
+    const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    const formatted = raw.map(item => {
+      const parts = item.date.split('-');
+      const mIdx = parseInt(parts[1] || '1', 10) - 1;
+      const day = parts[2] || '';
+      return {
+        ...item,
+        label: `${day} ${months[mIdx] ?? ''}`.trim(),
+      };
+    });
+    const avg = formatted.length > 0
+      ? formatted.reduce((s, r) => s + r.gen_kwh, 0) / formatted.length
+      : 0;
+    return { dailySeries: formatted, dailyAvg: avg };
+  }, [dailyData]);
 
   const filteredPlants = useMemo(() => {
     if (!data) return [];
@@ -161,22 +274,36 @@ export default function Dashboard() {
 
         {error && <ErrorState message={error} onRetry={refresh} />}
 
-        {/* ── Charts ───────────────────────────────────────────── */}
+        {/* ── Charts & Business Intelligence ───────────────────── */}
         {data && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.65fr 1fr', gap: 16 }}>
 
-            {/* Bar chart */}
-            <div style={{ ...sCard, padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BRAND.border}` }}>
-                <p className="section-title" style={{ fontSize: 13.5 }}>Energía Hoy por Planta</p>
+            {/* Bar chart con Etiquetas y Coloración por Rango Histórico / Esperado */}
+            <div style={{ ...sCard, padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <div style={{
+                padding: '12px 16px',
+                borderBottom: `1px solid ${BRAND.border}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                flexWrap: 'wrap',
+              }}>
+                <div>
+                  <p className="section-title" style={{ fontSize: 13.5, margin: 0 }}>Energía Hoy por Planta</p>
+                  <p style={{ fontSize: 11, color: BRAND.muted, margin: '2px 0 0 0' }}>
+                    Coloración según desempeño a la hora actual vs. rango histórico / pares
+                  </p>
+                </div>
               </div>
-              <div style={{ padding: '12px 14px' }}>
-                <div style={{ height: 250 }}>
+              <div style={{ padding: '12px 14px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div style={{ height: 255 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={barData} barSize={14} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                    <BarChart data={barData} barSize={18} margin={{ top: 20, right: 6, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(15,23,42,0.05)" vertical={false} />
                       <XAxis
-                        dataKey="name"
+                        dataKey="plantCode"
+                        tickFormatter={(code) => barData.find(b => b.plantCode === code)?.name ?? String(code)}
                         tick={{ fill: BRAND.muted, fontSize: 10 }}
                         axisLine={false}
                         tickLine={false}
@@ -189,69 +316,136 @@ export default function Dashboard() {
                         width={56}
                       />
                       <Tooltip content={<BarTooltip />} cursor={{ fill: 'rgba(15,23,42,0.02)', radius: 4 }} />
-                      <Bar dataKey="energy" radius={[4, 4, 0, 0]}>
-                        {barData.map((e, i) => (
-                          <Cell key={i} fill={
-                            e.health === 3 ? BRAND.green :
-                            e.health === 2 ? BRAND.gold : BRAND.dim
-                          } />
+                      <Bar dataKey="energy" radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                        {barData.map((e) => (
+                          <Cell key={e.plantCode} fill={RANGE_META[e.rangeStatus].color} />
                         ))}
+                        <LabelList
+                          dataKey="energy"
+                          position="top"
+                          formatter={(v: any) => (Number(v) > 0 ? Math.round(Number(v)) : '')}
+                          style={{ fill: '#334155', fontSize: 10, fontWeight: 700 }}
+                        />
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
                 {/* Legend */}
-                <div style={{ display: 'flex', gap: 12, marginTop: 10, paddingTop: 8, borderTop: `1px solid ${BRAND.border}` }}>
-                  {[{ c: BRAND.green, l: 'Operativa' }, { c: BRAND.gold, l: 'En alarma' }, { c: BRAND.dim, l: 'Offline / Sin datos' }].map(({ c, l }) => (
-                    <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: 2, background: c, flexShrink: 0 }} />
-                      <span style={{ fontSize: 11, color: BRAND.muted }}>{l}</span>
+                <div style={{ display: 'flex', gap: 14, marginTop: 10, paddingTop: 8, borderTop: `1px solid ${BRAND.border}`, flexWrap: 'wrap' }}>
+                  {(['optimal', 'warning', 'critical', 'nodata'] as RangeStatus[]).map(st => (
+                    <div key={st} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: RANGE_META[st].color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, color: BRAND.muted, fontWeight: 500 }}>{RANGE_META[st].label}</span>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
 
-            {/* Pie chart */}
-            <div style={{ ...sCard, padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BRAND.border}` }}>
-                <p className="section-title" style={{ fontSize: 13.5 }}>Capacidad Instalada</p>
+            {/* Gráfico de Líneas: Sumatoria Diaria de Generación (Último Mes) */}
+            <div style={{ ...sCard, padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <div style={{
+                padding: '12px 16px',
+                borderBottom: `1px solid ${BRAND.border}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}>
+                <div>
+                  <p className="section-title" style={{ fontSize: 13.5, margin: 0 }}>Generación Diaria del Portafolio</p>
+                  <p style={{ fontSize: 11, color: BRAND.muted, margin: '2px 0 0 0' }}>
+                    Sumatoria por día — Últimos 30 días (kWh/día)
+                  </p>
+                </div>
+                {dailyAvg > 0 && (
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: BRAND.muted, textTransform: 'uppercase' }}>Promedio/día</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 800, color: BRAND.teal }}>{fmt(dailyAvg, 0)} kWh</div>
+                  </div>
+                )}
               </div>
-              <div style={{ padding: '12px' }}>
-                <div style={{ height: 250 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        dataKey="value"
-                        cx="50%"
-                        cy="40%"
-                        outerRadius={75}
-                        innerRadius={45}
-                        paddingAngle={2}
-                        strokeWidth={0}
-                      >
-                        {pieData.map((_, i) => (
-                          <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          background: '#fff',
-                          border: '1px solid rgba(15,23,42,0.09)',
-                          borderRadius: 8,
-                          fontSize: 11,
-                          boxShadow: '0 4px 12px rgba(15,23,42,0.08)',
-                        }}
-                        formatter={(v) => [`${v} kWp`, 'Capacidad']}
-                      />
-                      <Legend
-                        iconType="circle"
-                        iconSize={6}
-                        formatter={(v) => <span style={{ color: BRAND.muted, fontSize: 10.5 }}>{v}</span>}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+
+              <div style={{ padding: '12px 14px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div style={{ height: 255 }}>
+                  {dailySeries.length === 0 ? (
+                    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: BRAND.muted, fontSize: 12 }}>
+                      Cargando histórico diario del portafolio…
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={dailySeries} margin={{ top: 14, right: 10, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(15,23,42,0.05)" vertical={false} />
+                        <XAxis
+                          dataKey="label"
+                          tick={{ fill: BRAND.muted, fontSize: 10 }}
+                          axisLine={false}
+                          tickLine={false}
+                          minTickGap={18}
+                        />
+                        <YAxis
+                          tick={{ fill: BRAND.muted, fontSize: 10 }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={50}
+                          tickFormatter={(v) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: '#fff',
+                            border: '1px solid rgba(15,23,42,0.09)',
+                            borderRadius: 10,
+                            fontSize: 11.5,
+                            boxShadow: '0 6px 18px rgba(15,23,42,0.10)',
+                          }}
+                          formatter={(value: any, _name: any, props: any) => [
+                            `${fmt(Number(value), 1)} kWh (${props?.payload?.plants_count ?? '—'} plantas)`,
+                            'Generación total',
+                          ]}
+                          labelFormatter={(label: any, payload: any) => {
+                            const fullDate = payload?.[0]?.payload?.date;
+                            return fullDate ? `${label} (${fullDate})` : String(label);
+                          }}
+                        />
+                        {dailyAvg > 0 && (
+                          <ReferenceLine
+                            y={dailyAvg}
+                            stroke="#F59E0B"
+                            strokeDasharray="5 5"
+                            strokeWidth={1.6}
+                            label={{
+                              value: `Prom: ${fmt(dailyAvg, 0)}`,
+                              position: 'insideTopRight',
+                              fill: '#B45309',
+                              fontSize: 10,
+                              fontWeight: 700,
+                            }}
+                          />
+                        )}
+                        <Line
+                          type="monotone"
+                          dataKey="gen_kwh"
+                          stroke={BRAND.teal}
+                          strokeWidth={2.4}
+                          dot={{ r: 2.5, fill: BRAND.teal, strokeWidth: 0 }}
+                          activeDot={{ r: 5, fill: BRAND.green, stroke: '#fff', strokeWidth: 2 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 8, borderTop: `1px solid ${BRAND.border}`, fontSize: 11, color: BRAND.muted, flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 12, height: 2.5, background: BRAND.teal, display: 'inline-block', borderRadius: 2 }} />
+                      Generación/día
+                    </span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 14, borderTop: '2px dashed #F59E0B', display: 'inline-block' }} />
+                      Promedio ({fmt(dailyAvg, 0)} kWh)
+                    </span>
+                  </div>
+                  <span>{dailySeries.length} días registrados</span>
                 </div>
               </div>
             </div>

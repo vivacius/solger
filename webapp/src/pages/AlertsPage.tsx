@@ -1,9 +1,10 @@
 import { AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useFetch } from '../hooks/useFetch';
 import { ErrorState, LoadingSpinner } from '../components/ui/States';
 import { Header } from '../components/layout/Header';
-import { fmtDate, BRAND } from '../lib/utils';
+import { fmtDate, plantSlug, BRAND } from '../lib/utils';
 
 export default function AlertsPage() {
   const { data, loading, error, refresh } = useFetch(
@@ -110,29 +111,38 @@ export default function AlertsPage() {
                   {data.alarms.map((alarm, idx) => (
                     <tr
                       key={alarm.alarmId || idx}
-                      style={{ borderBottom: `1px solid ${BRAND.border}` }}
+                      style={{ borderBottom: `1px solid ${BRAND.border}`, verticalAlign: 'top' }}
                       onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = BRAND.surface}
                       onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
                     >
-                      <td style={{ padding: '10px 14px' }}>
+                      <td style={{ padding: '12px 14px', minWidth: 170 }}>
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                          <AlertTriangle size={14} style={{ color: BRAND.red, flexShrink: 0, marginTop: 1.5 }} />
-                          <span style={{ fontWeight: 700, fontSize: 12.5, color: BRAND.text }}>
+                          <AlertTriangle size={14} style={{ color: BRAND.red, flexShrink: 0, marginTop: 2 }} />
+                          <span style={{ fontWeight: 700, fontSize: 12.5, color: BRAND.text, lineHeight: 1.35 }}>
                             {alarm.alarmName || 'Alarma no especificada'}
                           </span>
                         </div>
                       </td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: BRAND.text }}>{alarm.stationCode}</div>
-                        <div style={{ fontSize: 11, color: BRAND.muted, marginTop: 1 }}>{alarm.devName || 'Planta General'}</div>
+                      <td style={{ padding: '12px 14px', minWidth: 160 }}>
+                        {alarm.plantCode ? (
+                          <Link
+                            to={`/plantas/${plantSlug(alarm.plantCode)}`}
+                            style={{ fontSize: 12.5, fontWeight: 700, color: BRAND.teal, textDecoration: 'none', display: 'block' }}
+                          >
+                            {alarm.stationCode}
+                          </Link>
+                        ) : (
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: BRAND.text }}>{alarm.stationCode}</div>
+                        )}
+                        <div style={{ fontSize: 11, color: BRAND.muted, marginTop: 2 }}>{alarm.devName || 'Planta General'}</div>
                       </td>
-                      <td style={{ padding: '10px 14px', fontSize: 12, color: BRAND.muted, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '12px 14px', fontSize: 12, color: BRAND.text, minWidth: 240, maxWidth: 340, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.45 }}>
                         {alarm.alarmCause || '—'}
                       </td>
-                      <td style={{ padding: '10px 14px', fontSize: 12, color: BRAND.muted, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '12px 14px', fontSize: 12, color: BRAND.muted, minWidth: 260, maxWidth: 380, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.45 }}>
                         {alarm.repairSuggestion || '—'}
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: 11.5, color: BRAND.dim, whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '12px 14px', textAlign: 'right', fontSize: 11.5, color: BRAND.dim, whiteSpace: 'nowrap' }}>
                         {alarm.raiseTime ? fmtDate(new Date(alarm.raiseTime).toISOString()) : '—'}
                       </td>
                     </tr>

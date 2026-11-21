@@ -200,16 +200,17 @@ export default function InvoicePage() {
   const [selectedPlant, setSelectedPlant] = useState<string>('ALL');
   const [selectedYear, setSelectedYear] = useState<string>('ALL');
   const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
+  const [expandedPlants, setExpandedPlants] = useState<Set<string>>(new Set());
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
-  // Auto-expandir si hay 1 o 2 facturas
-  useEffect(() => {
-    if (invoices.length > 0 && expandedIds.size === 0) {
-      if (invoices.length <= 2) {
-        setExpandedIds(new Set(invoices.map(i => i.id)));
-      }
-    }
-  }, [invoices]);
+  const togglePlantGroup = (key: string) => {
+    setExpandedPlants(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const toggleExpand = (id: string) => {
     setExpandedIds(prev => {
@@ -220,11 +221,13 @@ export default function InvoicePage() {
     });
   };
 
-  const expandAll = (ids: string[]) => {
+  const expandAll = (plantKeys: string[], ids: string[]) => {
+    setExpandedPlants(new Set(plantKeys));
     setExpandedIds(new Set(ids));
   };
 
   const collapseAll = () => {
+    setExpandedPlants(new Set());
     setExpandedIds(new Set());
   };
 
@@ -283,6 +286,55 @@ export default function InvoicePage() {
   }, [invoices, selectedPlant, selectedYear, selectedMonth]);
 
   const hasActiveFilters = selectedPlant !== 'ALL' || selectedYear !== 'ALL' || selectedMonth !== 'ALL';
+
+  const groupedInvoices = useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      plantName: string;
+      company: string;
+      invoices: Invoice[];
+      totalKwh: number;
+      totalCop: number;
+      totalSobrecosto: number;
+      hasPending: boolean;
+      hasAudited: boolean;
+    }>();
+
+    for (const inv of filteredInvoices) {
+      const plantName = inv.plant_name || inv.plant_code || 'Sin Planta';
+      const key = plantName.toUpperCase();
+      let group = map.get(key);
+      if (!group) {
+        group = {
+          key,
+          plantName,
+          company: inv.company || 'Celsia',
+          invoices: [],
+          totalKwh: 0,
+          totalCop: 0,
+          totalSobrecosto: 0,
+          hasPending: false,
+          hasAudited: false,
+        };
+        map.set(key, group);
+      }
+      group.invoices.push(inv);
+      group.totalKwh += inv.kwh_billed || 0;
+      group.totalCop += inv.subtotal_energia_cop ?? inv.total_pagar_cop ?? 0;
+      group.totalSobrecosto += inv.audit?.sobrecosto_cop ?? inv.difference_cop ?? 0;
+      if (inv.status === 'pending') group.hasPending = true;
+      if (inv.audit) group.hasAudited = true;
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.plantName.localeCompare(b.plantName));
+  }, [filteredInvoices]);
+
+  useEffect(() => {
+    if (invoices.length > 0 && invoices.length <= 2 && expandedIds.size === 0) {
+      setExpandedPlants(new Set(groupedInvoices.map(g => g.key)));
+      setExpandedIds(new Set(invoices.map(i => i.id)));
+    }
+  }, [invoices, groupedInvoices]);
 
   const total        = invoices.length;
   const pending      = invoices.filter(i => i.status === 'pending').length;
@@ -416,12 +468,12 @@ export default function InvoicePage() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>
-              Mostrando <strong style={{ color: BRAND.text }}>{filteredInvoices.length}</strong> de {invoices.length} facturas
+              Mostrando <strong style={{ color: BRAND.text }}>{filteredInvoices.length}</strong> de {invoices.length} facturas ({groupedInvoices.length} {groupedInvoices.length === 1 ? 'planta' : 'plantas'})
             </span>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <button
-                onClick={() => expandAll(filteredInvoices.map(i => i.id))}
+                onClick={() => expandAll(groupedInvoices.map(g => g.key), filteredInvoices.map(i => i.id))}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 4,
                   padding: '5px 10px', borderRadius: 6, fontSize: 11.5, fontWeight: 600,
@@ -477,7 +529,113 @@ export default function InvoicePage() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {filteredInvoices.map(inv => {
+            {groupedInvoices.map(group => {
+              const isPlantExpanded = expandedPlants.has(group.key);
+              const groupHasCritical = group.totalSobrecosto > 50000;
+              const groupStatusColor = groupHasCritical
+                ? BRAND.red
+                : group.hasAudited
+                  ? BRAND.green
+                  : BRAND.gold;
+
+              return (
+                <div
+                  key={group.key}
+                  className="card"
+                  style={{
+                    padding: isPlantExpanded ? '16px 20px' : '14px 20px',
+                    borderLeft: `5px solid ${groupStatusColor}`,
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {/* ── Cabecera colapsable de Planta ── */}
+                  <div
+                    onClick={() => togglePlantGroup(group.key)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      flexWrap: 'wrap',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{
+                        width: 34, height: 34, borderRadius: 9,
+                        background: `${BRAND.teal}14`, color: BRAND.teal,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0,
+                      }}>
+                        <Building2 size={17} />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+                            {group.plantName}
+                          </span>
+                          <span style={{
+                            fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                            background: `${BRAND.teal}15`, color: BRAND.teal, border: `1px solid ${BRAND.teal}30`,
+                          }}>
+                            {group.invoices.length} {group.invoices.length === 1 ? 'recibo' : 'recibos'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 2 }}>
+                          {group.company} · Energía facturada acumulada: <strong>{fmtEnergy(group.totalKwh)}</strong> · Total COP: <strong>${fmt(group.totalCop, 0)}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {groupHasCritical ? (
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          fontSize: 11.5, fontWeight: 700, padding: '4px 10px', borderRadius: 8,
+                          background: `${BRAND.red}12`, color: BRAND.red, border: `1px solid ${BRAND.red}30`,
+                        }}>
+                          <AlertTriangle size={13} /> Sobrecosto: +${fmt(group.totalSobrecosto, 0)} COP
+                        </span>
+                      ) : group.hasAudited ? (
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          fontSize: 11.5, fontWeight: 700, padding: '4px 10px', borderRadius: 8,
+                          background: `${BRAND.green}12`, color: BRAND.green, border: `1px solid ${BRAND.green}30`,
+                        }}>
+                          <CheckCircle size={13} /> Auditadas OK
+                        </span>
+                      ) : (
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          fontSize: 11.5, fontWeight: 700, padding: '4px 10px', borderRadius: 8,
+                          background: `${BRAND.gold}14`, color: BRAND.gold, border: `1px solid ${BRAND.gold}30`,
+                        }}>
+                          <Clock size={13} /> Pendiente auditoría
+                        </span>
+                      )}
+
+                      <div style={{
+                        width: 28, height: 28, borderRadius: 7,
+                        background: '#0F172A08', color: 'var(--text-secondary)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {isPlantExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── Lista de recibos de esta planta ── */}
+                  {isPlantExpanded && (
+                    <div style={{
+                      marginTop: 14,
+                      paddingTop: 14,
+                      borderTop: '1px solid var(--border-subtle)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}>
+                      {group.invoices.map(inv => {
               const st = STATUS_MAP[inv.status] || STATUS_MAP.pending;
               const StatusIcon = st.icon;
               const audit = inv.audit;
@@ -492,8 +650,9 @@ export default function InvoicePage() {
                   key={inv.id}
                   className="card"
                   style={{
-                    padding: isExpanded ? '18px 22px' : '12px 18px',
-                    borderLeft: `5px solid ${hasCriticalExcess ? BRAND.red : (audit ? BRAND.green : BRAND.border)}`,
+                    padding: isExpanded ? '16px 20px' : '11px 16px',
+                    borderLeft: `4px solid ${hasCriticalExcess ? BRAND.red : (audit ? BRAND.green : BRAND.border)}`,
+                    background: 'var(--bg-subtle, #F8FAFC)',
                     transition: 'all 0.15s ease',
                   }}
                 >
@@ -890,6 +1049,11 @@ export default function InvoicePage() {
                       {inv.notes}
                     </p>
                   )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
                     </div>
                   )}
                 </div>

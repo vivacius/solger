@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from datetime import datetime
 import requests
 from dotenv import load_dotenv
@@ -42,14 +43,50 @@ def run_hourly_etl_and_alerts() -> dict:
         for k in kpis
     }
 
-    # Persistir series diarias de cada planta en solger.kpi_diario
+    # 1. Persistir el dato de HOY (day_power) de las 17 plantas en solger.kpi_diario en 1 sola tanda
+    today_ms = int(now_cot.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
     for p in plants:
         pcode = p.get("plantCode")
-        if pcode:
+        dim = kpi_map.get(pcode, {})
+        day_p = float(dim.get("day_power") or 0.0)
+        if pcode and day_p > 0:
             try:
-                backend_main.get_plant_kpi_month(pcode)
-            except Exception:
-                pass
+                supabase_store.upsert_monthly_kpi_to_supabase(pcode, [{
+                    "collectTime": today_ms,
+                    "dataItemMap": {
+                        "inverter_power": day_p,
+                        "inverterYield": day_p,
+                        "PVYield": day_p,
+                        "ongrid_power": float(dim.get("day_on_grid_energy") or 0.0),
+                        "buyPower": float(dim.get("day_buying_energy") or 0.0),
+                        "selfUsePower": float(dim.get("day_use_energy") or 0.0),
+                    },
+                }])
+            except Exception as exc:
+                print(f"[ETL SOLGER] Error guardando KPI de hoy para {pcode}: {exc}")
+
+    # 2. Sincronizar el mes actual directo desde FusionSolar (sin atajo de caché) para cerrar días pasados
+    current_ym = now_cot.strftime("%Y%m")
+    for idx, p in enumerate(plants):
+        pcode = p.get("plantCode")
+        if not pcode:
+            continue
+        try:
+            m_data = fusion_client.get_station_kpi_month(pcode, current_ym)
+            raw_rows = m_data.get("data") or []
+            if raw_rows:
+                supabase_store.upsert_monthly_kpi_to_supabase(pcode, raw_rows)
+        except Exception as exc:
+            print(f"[ETL SOLGER] Aviso en mes actual {pcode}: {exc}")
+        if idx < len(plants) - 1:
+            time.sleep(1.8)
+
+    # 3. Actualizar resumen de strings PV en Supabase para Mantenimiento y Vercel
+    try:
+        backend_main._PORTFOLIO_STRINGS_CACHE = None
+        backend_main.get_portfolio_strings_summary()
+    except Exception as exc:
+        print(f"[ETL SOLGER] Aviso actualizando resumen de strings PV: {exc}")
 
     # Verificar si estamos en ventana solar (07:00 a 17:00 COT) para alertas críticas inmediatas
     is_solar_window = 7 <= now_cot.hour <= 17

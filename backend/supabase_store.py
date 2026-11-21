@@ -941,6 +941,95 @@ def find_plant_by_account_code(account_code: str | None) -> dict[str, str] | Non
     return None
 
 
+def get_portfolio_daily_generation(days: int = 30) -> list[dict[str, Any]]:
+    """
+    Suma la generación diaria (`gen_kwh`) de todas las plantas en `solger.kpi_diario`
+    para los últimos `days` días.
+    """
+    if not is_configured():
+        return []
+    try:
+        from collections import defaultdict
+        from datetime import timedelta
+
+        start_date = (datetime.now(BOGOTA_TZ) - timedelta(days=max(1, days))).strftime("%Y-%m-%d")
+        base = f"{settings.SUPABASE_URL}/rest/v1"
+        url = (
+            f"{base}/kpi_diario?select=fecha,gen_kwh,planta_id"
+            f"&fecha=gte.{start_date}&order=fecha.asc&limit=5000"
+        )
+        r = requests.get(url, headers=_headers(), timeout=12)
+        if r.status_code != 200:
+            return []
+        rows = r.json() or []
+        by_date: dict[str, float] = defaultdict(float)
+        plants_by_date: dict[str, set[str]] = defaultdict(set)
+        for row in rows:
+            f_str = str(row.get("fecha", ""))[:10]
+            if not f_str:
+                continue
+            by_date[f_str] += float(row.get("gen_kwh") or 0.0)
+            if row.get("planta_id"):
+                plants_by_date[f_str].add(str(row["planta_id"]))
+
+        return [
+            {
+                "date": d,
+                "gen_kwh": round(by_date[d], 1),
+                "plants_count": len(plants_by_date[d]),
+            }
+            for d in sorted(by_date.keys())
+        ]
+    except Exception as exc:
+        logger.debug("Error consultando sumatoria diaria del portafolio: %s", exc)
+        return []
 
 
+def get_kv_cache(clave: str, max_age_sec: int = 1800) -> tuple[Any | None, bool]:
+    """
+    Lee un JSON cacheado en `solger.sync_cursor` de Supabase.
+    Retorna `(data, is_fresh)` para evitar llamadas repetidas a FusionSolar (407) en Vercel.
+    """
+    if not is_configured():
+        return None, False
+    try:
+        base = f"{settings.SUPABASE_URL}/rest/v1"
+        r = requests.get(
+            f"{base}/sync_cursor?clave=eq.{clave}&select=ultimo_valor,updated_at",
+            headers=_headers(),
+            timeout=6,
+        )
+        if r.status_code == 200 and r.json():
+            row = r.json()[0]
+            data = json.loads(row["ultimo_valor"])
+            updated_raw = str(row.get("updated_at") or "").replace("Z", "+00:00")
+            is_fresh = False
+            if updated_raw:
+                dt = datetime.fromisoformat(updated_raw)
+                age = (datetime.now(dt.tzinfo or BOGOTA_TZ) - dt).total_seconds()
+                is_fresh = age < max_age_sec
+            return data, is_fresh
+    except Exception as exc:
+        logger.debug("Error leyendo kv_cache %s: %s", clave, exc)
+    return None, False
+
+
+def set_kv_cache(clave: str, data: Any) -> None:
+    """Guarda un JSON en `solger.sync_cursor` de Supabase (ON CONFLICT clave)."""
+    if not is_configured():
+        return
+    try:
+        base = f"{settings.SUPABASE_URL}/rest/v1"
+        requests.post(
+            f"{base}/sync_cursor?on_conflict=clave",
+            headers=_headers(),
+            json={
+                "clave": clave,
+                "ultimo_valor": json.dumps(data, ensure_ascii=False),
+                "updated_at": datetime.now(BOGOTA_TZ).isoformat(),
+            },
+            timeout=6,
+        )
+    except Exception as exc:
+        logger.debug("Error guardando kv_cache %s: %s", clave, exc)
 

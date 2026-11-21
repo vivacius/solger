@@ -1,14 +1,15 @@
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Wrench, AlertTriangle, ShieldCheck, Clock,
-  X, Plus, Info, Settings, Activity,
+  X, Plus, Info, Settings, Activity, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 import { api } from '../lib/api';
 import { useFetch } from '../hooks/useFetch';
 import { Header } from '../components/layout/Header';
 import { LoadingSpinner } from '../components/ui/States';
-import { fmt, BRAND } from '../lib/utils';
+import { fmt, plantSlug, BRAND } from '../lib/utils';
 import type { AlarmItem } from '../types/api';
 
 /* ── Constantes de dominio ─────────────────────────────────────── */
@@ -135,7 +136,7 @@ export default function MaintenancePage() {
   const { data: summary, loading: summaryLoading, refresh } = useFetch(
     api.getSummary, [], { refreshInterval: 5 * 60 * 1000 }
   );
-  const { data: alertsData, loading: alertsLoading } = useFetch(
+  const { data: alertsData } = useFetch(
     api.getAlerts, [], { refreshInterval: 5 * 60 * 1000 }
   );
   const { data: anomaliesData } = useFetch(
@@ -144,21 +145,16 @@ export default function MaintenancePage() {
   const { data: ordersData } = useFetch(
     () => api.getMaintenanceOrders(), [], { refreshInterval: 5 * 60 * 1000 }
   );
+  const { data: stringsSummary } = useFetch(
+    api.getPortfolioStringsSummary, [], { refreshInterval: 15 * 60 * 1000 }
+  );
 
   // Clave para forzar re-render tras guardar en localStorage
   const [refreshKey, setRefreshKey] = useState(0);
+  const [showDiag, setShowDiag] = useState(false);
 
   // Planta seleccionada para modal de historial
   const [modalPlant, setModalPlant] = useState<{ code: string; name: string } | null>(null);
-
-  /* ── Clasificación de alarmas ─── */
-  const classifiedAlarms = useMemo(() => {
-    if (!alertsData?.alarms) return { revisar: [] as AlarmItem[], genericas: [] as AlarmItem[] };
-    return {
-      revisar:   alertsData.alarms.filter(a => classifyAlarm(a) === 'REVISAR'),
-      genericas: alertsData.alarms.filter(a => classifyAlarm(a) === 'GENERICA'),
-    };
-  }, [alertsData]);
 
   /* ── Datos de salud por planta ─── */
   const plantHealth = useMemo(() => {
@@ -206,11 +202,15 @@ export default function MaintenancePage() {
       const upcomingTask = nextTasks.find(t => t.priority === 'media');
       const nextTask     = urgentTask ?? upcomingTask ?? nextTasks[0];
 
-      // Prioridad global de la planta (Huawei: 1=Offline, 2=Alarma, 3=Operativa + motor estadístico)
+      const pvStat = stringsSummary?.byPlant?.[plant.plantCode];
+      const pvFaults = pvStat?.fault ?? 0;
+      const pvLows = pvStat?.low ?? 0;
+
+      // Prioridad global de la planta (Huawei + motor estadístico + salud de strings PV)
       let overallPriority: 'urgente' | 'atencion' | 'ok';
-      if (health === 1 || hasAlarm || anomEval?.anomalia?.severidad === 'critica' || (pr !== null && pr < PR_CRIT) || !!urgentTask) {
+      if (health === 1 || hasAlarm || pvFaults > 0 || anomEval?.anomalia?.severidad === 'critica' || (pr !== null && pr < PR_CRIT)) {
         overallPriority = 'urgente';
-      } else if (health === 2 || anomEval?.anomalia?.severidad === 'atencion' || (pr !== null && pr < PR_WARN) || !!upcomingTask) {
+      } else if (health === 2 || pvLows > 0 || anomEval?.anomalia?.severidad === 'atencion' || (pr !== null && pr < PR_WARN)) {
         overallPriority = 'atencion';
       } else {
         overallPriority = 'ok';
@@ -218,15 +218,19 @@ export default function MaintenancePage() {
 
       return {
         plant, dim, dayPower, capacity, capEstimated,
-        pr, kwhPerKwp, health, hasAlarm, anomEval,
+        pr, kwhPerKwp, health, hasAlarm, anomEval, pvStat,
         records, nextTasks, nextTask, overallPriority,
       };
     }).sort((a, b) => {
       const o = { urgente: 0, atencion: 1, ok: 2 };
-      return o[a.overallPriority] - o[b.overallPriority];
+      if (o[a.overallPriority] !== o[b.overallPriority]) return o[a.overallPriority] - o[b.overallPriority];
+      // Dentro de la misma prioridad, ordenar primero las plantas con más strings rojos y amarillos
+      const scoreA = (a.pvStat?.fault ?? 0) * 100 + (a.pvStat?.low ?? 0) * 10;
+      const scoreB = (b.pvStat?.fault ?? 0) * 100 + (b.pvStat?.low ?? 0) * 10;
+      return scoreB - scoreA;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary, alertsData, anomaliesData, ordersData, refreshKey]);
+  }, [summary, alertsData, anomaliesData, ordersData, stringsSummary, refreshKey]);
 
   /* ── Semáforo portafolio ─── */
   const counts = useMemo(() => ({
@@ -279,16 +283,24 @@ export default function MaintenancePage() {
 
         {/* ── PANEL DE DIAGNÓSTICO ESTADÍSTICO DE ANOMALÍAS (4 CAPAS) ─── */}
         <div style={{ ...SC, borderTop: `3px solid ${BRAND.teal}` }}>
-          <div style={{
-            padding: '10px 16px',
-            borderBottom: `1px solid ${BRAND.border}`,
-            background: 'linear-gradient(90deg, rgba(36,165,174,0.06) 0%, rgba(88,174,50,0.04) 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: 8,
-          }}>
+          <button
+            type="button"
+            onClick={() => setShowDiag(v => !v)}
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '10px 16px',
+              borderBottom: showDiag ? `1px solid ${BRAND.border}` : 'none',
+              background: 'linear-gradient(90deg, rgba(36,165,174,0.06) 0%, rgba(88,174,50,0.04) 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 8,
+            }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Activity size={15} color={BRAND.teal} />
               <div>
@@ -296,20 +308,30 @@ export default function MaintenancePage() {
                   Diagnóstico Estadístico de Rendimiento y Anomalías (4 Capas)
                 </p>
                 <p style={{ fontSize: 11, color: BRAND.muted, margin: 0 }}>
-                  Evalúa cada planta sin piranómetro cruzando: (1) Reglas duras, (2) Esperado físico P50, (3) Ratio vs. plantas vecinas del Valle y (4) Z-Score robusto MAD + EWMA (Soiling)
+                  (1) Reglas duras · (2) Esperado físico P50 · (3) Ratio vs. pares del Valle · (4) Z-Score MAD + EWMA
                 </p>
               </div>
             </div>
-            <span style={{
-              fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 99,
-              background: BRAND.tealL, color: BRAND.teal,
-            }}>
-              {anomaliesData?.anomaliesCount ?? 0} anomalías detectadas hoy
-            </span>
-          </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{
+                fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 99,
+                background: BRAND.tealL, color: BRAND.teal,
+              }}>
+                {anomaliesData?.anomaliesCount ?? 0} anomalías hoy
+              </span>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontSize: 11, fontWeight: 700, color: BRAND.text,
+                padding: '4px 10px', borderRadius: 6,
+                background: '#fff', border: `1px solid ${BRAND.border}`,
+              }}>
+                {showDiag ? <><ChevronUp size={13} /> Ocultar</> : <><ChevronDown size={13} /> Ver diagnóstico</>}
+              </span>
+            </div>
+          </button>
 
-          {/* Resumen de las 4 capas estadísticas */}
-          {(() => {
+          {/* Resumen de las 4 capas estadísticas (Desplegable) */}
+          {showDiag && (() => {
             const evals = anomaliesData?.evaluations ?? [];
             const validYfs = evals.map(e => e.yf_kwh_kwp).filter((v): v is number => v != null && v > 0).sort((a, b) => a - b);
             const medianYf = validYfs.length > 0 ? validYfs[Math.floor(validYfs.length / 2)] : 0;
@@ -445,9 +467,9 @@ export default function MaintenancePage() {
         <div style={SC}>
           <div style={{ padding: '8px 14px', borderBottom: `1px solid ${BRAND.border}`, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Activity size={13} color={BRAND.teal} />
-            <p className="section-title" style={{ fontSize: 13 }}>Estado de Salud por Planta</p>
+            <p className="section-title" style={{ fontSize: 13 }}>Estado de Salud por Planta (Strings PV)</p>
             <span style={{ marginLeft: 'auto', fontSize: 10.5, color: BRAND.dim }}>
-              PR = Rendimiento real vs. esperado ({(HSP * EFF).toFixed(1)} kWh/kWp·día ref.)
+              Ordenado por plantas con strings en rojo y amarillo
             </span>
           </div>
 
@@ -458,9 +480,9 @@ export default function MaintenancePage() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${BRAND.border}` }}>
-                    {['Planta', 'Estado', 'PR Hoy', 'kWh/kWp', 'Intervenciones', 'Próxima Tarea', 'Prioridad', ''].map(h => (
+                    {['Planta', 'Strings (PV)', 'Qué Hacer (Acción Recomendada)', ''].map(h => (
                       <th key={h} style={{
-                        padding: '7px 12px', textAlign: 'left',
+                        padding: '7px 14px', textAlign: 'left',
                         fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
                         textTransform: 'uppercase', color: BRAND.muted,
                         background: BRAND.surface, whiteSpace: 'nowrap',
@@ -470,44 +492,23 @@ export default function MaintenancePage() {
                 </thead>
                 <tbody>
                   {plantHealth.map(ph => {
-                    const { plant, pr, kwhPerKwp, health, capEstimated, capacity, anomEval, records, nextTask, overallPriority } = ph;
-
-                    const healthMap = {
-                      3: { label: 'Operativa', color: BRAND.greenD, bg: BRAND.greenL },
-                      2: { label: 'Alarma',    color: '#92400E',     bg: '#FEF9C3'    },
-                      1: { label: 'Offline',   color: '#991B1B',     bg: BRAND.redL   },
-                      0: { label: 'Sin datos', color: BRAND.muted,   bg: BRAND.surface},
-                    };
-                    const hc = healthMap[health as keyof typeof healthMap] ?? healthMap[0];
-
-                    const prioMap = {
-                      urgente:  { label: 'Urgente',  color: '#991B1B',    bg: BRAND.redL   },
-                      atencion: { label: 'Atención', color: '#92400E',    bg: '#FEF9C3'    },
-                      ok:       { label: 'OK',       color: BRAND.greenD, bg: BRAND.greenL },
-                    };
-                    const ps = prioMap[overallPriority];
-
-                    const prColor = pr == null ? BRAND.dim
-                      : pr < PR_CRIT ? BRAND.red
-                      : pr < PR_WARN ? BRAND.gold
-                      : BRAND.green;
-
-                    const sortedRecs = [...records].sort(
-                      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-                    );
+                    const { plant, capEstimated, capacity, pvStat } = ph;
 
                     return (
                       <tr
                         key={plant.plantCode}
-                        style={{ borderBottom: `1px solid ${BRAND.border}` }}
+                        style={{ borderBottom: `1px solid ${BRAND.border}`, verticalAlign: 'top' }}
                         onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = BRAND.surface}
                         onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
                       >
                         {/* Planta */}
-                        <td style={{ padding: '9px 12px' }}>
-                          <div style={{ fontWeight: 700, fontSize: 12.5, color: BRAND.text, lineHeight: 1.2 }}>
+                        <td style={{ padding: '10px 14px', minWidth: 180 }}>
+                          <Link
+                            to={`/plantas/${plantSlug(plant.plantCode)}`}
+                            style={{ fontWeight: 700, fontSize: 13, color: BRAND.teal, textDecoration: 'none', lineHeight: 1.2, display: 'block' }}
+                          >
                             {plant.plantName}
-                          </div>
+                          </Link>
                           <div style={{ fontSize: 10.5, color: BRAND.muted, marginTop: 2 }}>
                             {capEstimated ? (
                               <>
@@ -521,128 +522,58 @@ export default function MaintenancePage() {
                           </div>
                         </td>
 
-                        {/* Estado operación */}
-                        <td style={{ padding: '9px 12px' }}>
-                          <span style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                            padding: '2px 8px', borderRadius: 20,
-                            fontSize: 10.5, fontWeight: 700,
-                            color: hc.color, background: hc.bg,
-                          }}>
-                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: hc.color, display: 'inline-block' }} />
-                            {hc.label}
-                          </span>
-                        </td>
-
-                        {/* PR */}
-                        <td style={{ padding: '9px 12px', minWidth: 110 }}>
-                          {pr == null ? (
-                            <span style={{ fontSize: 10.5, color: BRAND.dim, fontStyle: 'italic' }}>
-                              Cap. no config.
+                        {/* Salud Strings (PV) */}
+                        <td style={{ padding: '10px 14px', minWidth: 210 }}>
+                          {!pvStat || pvStat.total === 0 ? (
+                            <span style={{ fontSize: 11, color: BRAND.dim }}>Sin lectura aún</span>
+                          ) : pvStat.night > 0 && pvStat.ok === 0 && pvStat.low === 0 && pvStat.fault === 0 ? (
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: BRAND.surface, color: BRAND.muted }}>
+                              🌙 {pvStat.night} en reposo
                             </span>
                           ) : (
-                            <div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                                <span style={{ fontSize: 12, fontWeight: 800, color: prColor }}>{fmt(pr, 0)}%</span>
-                              </div>
-                              <div style={{ height: 5, borderRadius: 3, background: BRAND.surface, overflow: 'hidden' }}>
-                                <div style={{
-                                  height: '100%', width: `${Math.min(100, pr)}%`,
-                                  background: prColor, borderRadius: 3,
-                                  transition: 'width 0.5s ease',
-                                }} />
-                              </div>
-                              <div style={{ fontSize: 9.5, color: BRAND.dim, marginTop: 2 }}>
-                                vs. {fmt(capacity * HSP * EFF, 1)} kWh esp.
-                              </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 6, background: BRAND.greenL, color: BRAND.greenD }}>
+                                {pvStat.ok} 🟢
+                              </span>
+                              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 6, background: pvStat.low > 0 ? BRAND.goldL : BRAND.surface, color: pvStat.low > 0 ? '#92400E' : BRAND.dim }}>
+                                {pvStat.low} 🟡
+                              </span>
+                              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 6, background: pvStat.fault > 0 ? BRAND.redL : BRAND.surface, color: pvStat.fault > 0 ? BRAND.red : BRAND.dim }}>
+                                {pvStat.fault} 🔴
+                              </span>
                             </div>
                           )}
                         </td>
 
-                        {/* kWh/kWp + Diagnóstico estadístico de pares */}
-                        <td style={{ padding: '9px 12px' }}>
-                          {kwhPerKwp != null ? (
-                            <div>
-                              <span style={{
-                                fontSize: 13, fontWeight: 800,
-                                color: kwhPerKwp < 2.0 ? BRAND.gold : BRAND.text,
-                              }}>{fmt(kwhPerKwp, 1)}</span>
-                              <span style={{ fontSize: 10, color: BRAND.muted }}> kWh/kWp</span>
-                              {anomEval?.ratio_pares != null && (
-                                <div style={{ fontSize: 9.5, color: BRAND.dim, marginTop: 1 }}>
-                                  Pares: <b>{(anomEval.ratio_pares * 100).toFixed(0)}%</b>
-                                  {anomEval.z_score_robusto != null && ` · z=${anomEval.z_score_robusto}`}
-                                </div>
-                              )}
-                              {anomEval?.anomalia ? (
-                                <div title={anomEval.anomalia.descripcion} style={{ fontSize: 10, color: BRAND.red, fontWeight: 700, marginTop: 2 }}>
-                                  ⚡ {anomEval.anomalia.tipo.replace('_', ' ')}
-                                  {anomEval.cop_perdidos > 0 && ` (-$${Math.round(anomEval.cop_perdidos).toLocaleString('es-CO')})`}
-                                </div>
-                              ) : kwhPerKwp < 2.0 ? (
-                                <div style={{ fontSize: 10, color: BRAND.gold, marginTop: 1 }}>⚠ Bajo rendimiento</div>
-                              ) : null}
-                            </div>
-                          ) : <span style={{ color: BRAND.dim, fontSize: 11 }}>—</span>}
-                        </td>
-
-                        {/* Historial de intervenciones */}
-                        <td style={{ padding: '9px 12px', minWidth: 130 }}>
-                          {records.length === 0 ? (
-                            <span style={{ fontSize: 11, color: BRAND.dim, fontStyle: 'italic' }}>Sin registros</span>
+                        {/* Qué Hacer (Acción Recomendada) */}
+                        <td style={{ padding: '10px 14px', minWidth: 260, maxWidth: 400, whiteSpace: 'normal', lineHeight: 1.4 }}>
+                          {!pvStat ? (
+                            <span style={{ fontSize: 11, color: BRAND.dim }}>—</span>
                           ) : (
                             <div>
-                              <span style={{ fontSize: 13, fontWeight: 800, color: BRAND.text }}>{records.length}</span>
-                              <span style={{ fontSize: 10.5, color: BRAND.muted }}> intervenciones</span>
-                              <div style={{ fontSize: 10, color: BRAND.dim, marginTop: 1 }}>
-                                Últ: {new Date(sortedRecs[0].date).toLocaleDateString('es-CO', {
-                                  day: '2-digit', month: 'short', year: 'numeric',
-                                })}
+                              <div style={{
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                color: pvStat.fault > 0 ? BRAND.red : pvStat.low > 0 ? '#B45309' : pvStat.ok > 0 ? BRAND.greenD : BRAND.muted,
+                              }}>
+                                {pvStat.recommendedLabel}
                               </div>
+                              {pvStat.actionDetail && (
+                                <div style={{ fontSize: 11, color: BRAND.muted, marginTop: 2 }}>
+                                  {pvStat.actionDetail}
+                                </div>
+                              )}
                             </div>
                           )}
-                        </td>
-
-                        {/* Próxima tarea */}
-                        <td style={{ padding: '9px 12px', minWidth: 160 }}>
-                          {nextTask ? (
-                            <div>
-                              <div style={{
-                                fontSize: 11.5, fontWeight: 700,
-                                color: nextTask.priority === 'alta' ? BRAND.red
-                                  : nextTask.priority === 'media' ? '#92400E'
-                                  : BRAND.muted,
-                              }}>
-                                {nextTask.icon} {nextTask.label}
-                              </div>
-                              <div style={{ fontSize: 10, color: BRAND.dim, marginTop: 2 }}>
-                                {nextTask.isOverdue
-                                  ? `⏰ Vencida hace ${Math.abs(nextTask.daysUntil)} días`
-                                  : `📅 En ${nextTask.daysUntil} días (${nextTask.dueDate.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })})`}
-                              </div>
-                              <div style={{ fontSize: 9.5, color: BRAND.dim, marginTop: 1 }}>
-                                {nextTask.count} veces realizad{nextTask.count === 1 ? 'a' : 'as'}
-                              </div>
-                            </div>
-                          ) : <span style={{ fontSize: 11, color: BRAND.dim }}>—</span>}
-                        </td>
-
-                        {/* Prioridad global */}
-                        <td style={{ padding: '9px 12px' }}>
-                          <span style={{
-                            display: 'inline-block', padding: '3px 10px', borderRadius: 20,
-                            fontSize: 11, fontWeight: 700,
-                            color: ps.color, background: ps.bg,
-                          }}>{ps.label}</span>
                         </td>
 
                         {/* Botón historial */}
-                        <td style={{ padding: '9px 12px' }}>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', width: 100 }}>
                           <button
                             onClick={() => setModalPlant({ code: plant.plantCode, name: plant.plantName })}
                             style={{
-                              display: 'flex', alignItems: 'center', gap: 4,
-                              padding: '4px 10px', borderRadius: 6,
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              padding: '5px 10px', borderRadius: 6,
                               border: `1px solid ${BRAND.border}`,
                               background: 'transparent', cursor: 'pointer',
                               fontSize: 11, fontWeight: 600, color: BRAND.muted,
@@ -669,73 +600,6 @@ export default function MaintenancePage() {
               </table>
             </div>
           )}
-        </div>
-
-        {/* ── Alarmas clasificadas ────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12 }}>
-
-          {/* Panel: Alarmas a Revisar */}
-          <div style={SC}>
-            <div style={{ padding: '8px 14px', borderBottom: `1px solid ${BRAND.border}`, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <AlertTriangle size={13} color={BRAND.red} />
-              <p className="section-title" style={{ fontSize: 13 }}>Alarmas a Revisar</p>
-              <span style={{
-                marginLeft: 'auto', fontSize: 11, fontWeight: 700,
-                color: BRAND.red, background: BRAND.redL,
-                padding: '1px 8px', borderRadius: 20,
-              }}>{classifiedAlarms.revisar.length}</span>
-            </div>
-            <div style={{ maxHeight: 380, overflowY: 'auto' }}>
-              {alertsLoading ? (
-                <div style={{ padding: 16 }}><LoadingSpinner text="Consultando alarmas..." /></div>
-              ) : classifiedAlarms.revisar.length === 0 ? (
-                <div style={{ padding: '28px 16px', textAlign: 'center' }}>
-                  <ShieldCheck size={28} color={BRAND.greenD} style={{ margin: '0 auto 8px' }} />
-                  <p style={{ fontSize: 12, color: BRAND.muted }}>Sin alarmas activas que requieran revisión técnica</p>
-                </div>
-              ) : (
-                classifiedAlarms.revisar.map((alarm, i) => (
-                  <AlarmCard
-                    key={alarm.alarmId ?? i}
-                    alarm={alarm}
-                    isLast={i === classifiedAlarms.revisar.length - 1}
-                    variant="revisar"
-                  />
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Panel: Alarmas Genéricas */}
-          <div style={SC}>
-            <div style={{ padding: '8px 14px', borderBottom: `1px solid ${BRAND.border}`, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Info size={13} color={BRAND.muted} />
-              <p className="section-title" style={{ fontSize: 13 }}>Alarmas Genéricas / Informativas</p>
-              <span style={{
-                marginLeft: 'auto', fontSize: 11, fontWeight: 700,
-                color: BRAND.muted, background: BRAND.surface,
-                padding: '1px 8px', borderRadius: 20,
-              }}>{classifiedAlarms.genericas.length}</span>
-            </div>
-            <div style={{ maxHeight: 380, overflowY: 'auto' }}>
-              {alertsLoading ? (
-                <div style={{ padding: 16 }}><LoadingSpinner text="Consultando..." /></div>
-              ) : classifiedAlarms.genericas.length === 0 ? (
-                <div style={{ padding: '28px 16px', textAlign: 'center' }}>
-                  <p style={{ fontSize: 12, color: BRAND.muted }}>Sin alertas genéricas activas</p>
-                </div>
-              ) : (
-                classifiedAlarms.genericas.map((alarm, i) => (
-                  <AlarmCard
-                    key={alarm.alarmId ?? i}
-                    alarm={alarm}
-                    isLast={i === classifiedAlarms.genericas.length - 1}
-                    variant="generica"
-                  />
-                ))
-              )}
-            </div>
-          </div>
         </div>
 
         {/* ── Nota sobre capacidades estimadas ───────────────────── */}
@@ -765,66 +629,6 @@ export default function MaintenancePage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════ */
-/*  ALARM CARD                                                      */
-/* ═══════════════════════════════════════════════════════════════ */
-function AlarmCard({
-  alarm, isLast, variant,
-}: {
-  alarm: AlarmItem;
-  isLast: boolean;
-  variant: 'revisar' | 'generica';
-}) {
-  const dotColor = variant === 'revisar' ? BRAND.red : BRAND.dim;
-  const hoursActive = alarm.raiseTime
-    ? Math.floor((Date.now() - alarm.raiseTime) / 3_600_000)
-    : null;
-
-  return (
-    <div style={{
-      padding: '10px 14px',
-      borderBottom: isLast ? 'none' : `1px solid ${BRAND.border}`,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        <div style={{ width: 6, height: 6, borderRadius: '50%', background: dotColor, marginTop: 5, flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: BRAND.text }}>
-            {alarm.alarmName || 'Alarma sin nombre'}
-          </div>
-          <div style={{ fontSize: 11, color: BRAND.muted, marginTop: 2 }}>
-            {alarm.devName || 'Dispositivo —'} · <span style={{ fontFamily: 'monospace', fontSize: 10.5 }}>{alarm.stationCode}</span>
-          </div>
-          {alarm.alarmCause && (
-            <div style={{ fontSize: 11, color: BRAND.dim, marginTop: 4, fontStyle: 'italic' }}>
-              📌 {alarm.alarmCause}
-            </div>
-          )}
-          {alarm.repairSuggestion && variant === 'revisar' && (
-            <div style={{
-              fontSize: 11, marginTop: 5, padding: '4px 9px', borderRadius: 5,
-              background: 'rgba(36,165,174,0.06)', border: `1px solid ${BRAND.tealL}`,
-              color: BRAND.teal, fontWeight: 600,
-            }}>
-              🔧 {alarm.repairSuggestion}
-            </div>
-          )}
-          {hoursActive !== null && (
-            <div style={{ fontSize: 10, color: BRAND.dim, marginTop: 4 }}>
-              🕐 {new Date(alarm.raiseTime!).toLocaleString('es-CO', {
-                day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-              })}
-              {' — '}
-              <strong style={{ color: hoursActive > 24 ? BRAND.red : BRAND.muted }}>
-                {hoursActive}h activa
-              </strong>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

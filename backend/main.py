@@ -7,6 +7,7 @@ Nota de concurrencia:
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime, date
@@ -160,6 +161,24 @@ def get_portfolio_summary() -> dict[str, Any]:
         raise
     except Exception as exc:
         _handle_fusion_errors(exc)
+
+
+@app.get("/api/portfolio/daily-generation", tags=["Plantas"])
+def get_portfolio_daily_generation_endpoint(days: int = 30) -> dict[str, Any]:
+    """Sumatoria diaria de generación (kWh) de todas las plantas del portafolio en los últimos N días."""
+    series = supabase_store.get_portfolio_daily_generation(days=days)
+    return {
+        "success": True,
+        "days": days,
+        "series": series,
+    }
+
+
+@app.get("/api/satellite/irradiance-grid", tags=["Plantas"])
+def get_satellite_irradiance_grid() -> dict[str, Any]:
+    """Malla geográfica 5x5 de irradiancia horaria (W/m²) y nubosidad (%) sobre el Valle del Cauca."""
+    grid = satellite_irradiance.get_irradiance_grid()
+    return {"success": True, **grid}
 
 
 @app.get("/api/plants/{plant_code}/kpi", tags=["Plantas"])
@@ -354,6 +373,449 @@ def get_plant_devices(plant_code: str) -> dict[str, Any]:
     }
 
 
+@app.get("/api/plants/{plant_code}/strings", tags=["Dispositivos"])
+def get_plant_strings(plant_code: str) -> dict[str, Any]:
+    """
+    Telemetría en vivo por inversor y por cada string fotovoltaico (PV1..PV36),
+    con caché en Supabase (`solger.sync_cursor`) para evitar rate-limit 407 en Vercel.
+    """
+    decoded_code = plant_code.replace("__", "=")
+    kv_key = f"plant_strings_{decoded_code}"
+
+    # 1. Revisar caché fresca en Supabase (20 min, o 4h de noche) solo si tiene strings válidos
+    cot_hour = datetime.now(BOGOTA_TZ).hour
+    ttl_plant = 14400 if (cot_hour >= 18 or cot_hour < 6) else 1200
+    cached_plant, is_fresh = supabase_store.get_kv_cache(kv_key, max_age_sec=ttl_plant)
+    if cached_plant and is_fresh and any(inv.get("strings") for inv in (cached_plant.get("inverters") or [])):
+        return cached_plant
+
+    inverters_out: list[dict[str, Any]] = []
+    try:
+        # Usar mapa de inversores cacheado para ahorrar llamadas a getDevList
+        supa_devs, _ = supabase_store.get_kv_cache("portfolio_devices_map", max_age_sec=86400 * 7)
+        dev_map: dict[str, list[str]] = supa_devs or {}
+        if not dev_map and _DEVICES_SNAPSHOT_FILE.exists():
+            try:
+                dev_map = json.loads(_DEVICES_SNAPSHOT_FILE.read_text(encoding="utf-8")) or {}
+            except Exception:
+                dev_map = {}
+
+        cached_ids = dev_map.get(decoded_code) or []
+        devs: list[dict[str, Any]] = [{"id": did, "devName": f"Inversor {did}"} for did in cached_ids]
+
+        if not devs:
+            try:
+                dev_resp = fusion_client.get_dev_list(decoded_code)
+                devs = [d for d in (dev_resp.get("data") or []) if d.get("devTypeId") == 1]
+                if devs:
+                    dev_map[decoded_code] = [str(d["id"]) for d in devs]
+                    supabase_store.set_kv_cache("portfolio_devices_map", dev_map)
+                    try:
+                        _DEVICES_SNAPSHOT_FILE.parent.mkdir(parents=True, exist_ok=True)
+                        _DEVICES_SNAPSHOT_FILE.write_text(json.dumps(dev_map, indent=2), encoding="utf-8")
+                    except OSError:
+                        pass
+            except Exception:
+                devs = []
+
+        if not devs:
+            if cached_plant and cached_plant.get("inverters"):
+                return {**cached_plant, "source": "supabase_snapshot"}
+            return {"success": True, "plantCode": decoded_code, "inverters": [], "source": "no_inverters"}
+
+        dev_ids = [str(d["id"]) for d in devs]
+        kpi_resp = fusion_client.get_dev_real_kpi(dev_ids, dev_type=1)
+        kpi_by_id = {str(item.get("devId")): (item.get("dataItemMap") or {}) for item in (kpi_resp.get("data") or [])}
+
+        for d in devs:
+            did = str(d["id"])
+            dim = kpi_by_id.get(did, {})
+            raw_strings: list[dict[str, Any]] = []
+            for idx in range(1, 37):
+                u_val = float(dim.get(f"pv{idx}_u") or 0.0)
+                i_val = float(dim.get(f"pv{idx}_i") or 0.0)
+                if u_val > 5.0 or i_val > 0.02:
+                    raw_strings.append({
+                        "index": idx,
+                        "id": f"PV{idx}",
+                        "voltage_v": round(u_val, 1),
+                        "current_a": round(i_val, 2),
+                        "power_w": round(u_val * i_val, 0),
+                    })
+
+            active_currents = sorted(s["current_a"] for s in raw_strings if s["current_a"] >= 0.2)
+            median_i = active_currents[len(active_currents) // 2] if active_currents else 0.0
+
+            strings_classified = []
+            for s in raw_strings:
+                cur = s["current_a"]
+                if median_i < 0.3:
+                    status = "night"
+                    pct = None
+                else:
+                    pct = round((cur / median_i) * 100, 0)
+                    if cur < 0.15 or pct < 40:
+                        status = "fault"
+                    elif pct < 75:
+                        status = "low"
+                    else:
+                        status = "ok"
+                strings_classified.append({**s, "status": status, "pct_vs_median": pct})
+
+            inverters_out.append({
+                "id": did,
+                "name": d.get("devName") or f"Inversor {did}",
+                "model": d.get("model") or d.get("invType") or "",
+                "efficiency": round(float(dim.get("efficiency") or 0.0), 2),
+                "temperature": round(float(dim.get("temperature") or 0.0), 1),
+                "activePower_kw": round(float(dim.get("active_power") or 0.0), 2),
+                "mpptPower_kw": round(float(dim.get("mppt_power") or 0.0), 2),
+                "medianCurrent_a": round(median_i, 2),
+                "strings": strings_classified,
+            })
+
+        has_strings = any(inv.get("strings") for inv in inverters_out)
+        if not has_strings and cached_plant and any(inv.get("strings") for inv in (cached_plant.get("inverters") or [])):
+            return {**cached_plant, "source": "supabase_snapshot"}
+
+        res = {
+            "success": True,
+            "plantCode": decoded_code,
+            "source": "fusionsolar_live",
+            "inverters": inverters_out,
+        }
+        if has_strings:
+            supabase_store.set_kv_cache(kv_key, res)
+            # Actualizar solo si portfolio_strings_summary ya contiene el portafolio completo
+            try:
+                ok_c = sum(1 for inv in inverters_out for s in inv["strings"] if s["status"] == "ok")
+                low_c = sum(1 for inv in inverters_out for s in inv["strings"] if s["status"] == "low")
+                fault_c = sum(1 for inv in inverters_out for s in inv["strings"] if s["status"] == "fault")
+                night_c = sum(1 for inv in inverters_out for s in inv["strings"] if s["status"] == "night")
+                tot_c = ok_c + low_c + fault_c + night_c
+                if tot_c > 0:
+                    rtype, rlabel, adetail = _compute_string_action(ok_c, low_c, fault_c, night_c)
+                    p_sum, _ = supabase_store.get_kv_cache("portfolio_strings_summary", max_age_sec=86400)
+                    if isinstance(p_sum, dict) and len(p_sum) >= 5 and decoded_code in p_sum:
+                        p_sum[decoded_code].update({
+                            "ok": ok_c, "low": low_c, "fault": fault_c, "night": night_c, "total": tot_c,
+                            "recommendedType": rtype, "recommendedLabel": rlabel, "actionDetail": adetail,
+                        })
+                        supabase_store.set_kv_cache("portfolio_strings_summary", p_sum)
+            except Exception:
+                pass
+        return res
+    except Exception as exc:
+        logger.debug("Fallback en /strings para %s: %s", decoded_code, exc)
+        if cached_plant and cached_plant.get("inverters"):
+            return {**cached_plant, "source": "supabase_snapshot"}
+        return {
+            "success": True,
+            "plantCode": decoded_code,
+            "source": "unavailable",
+            "inverters": inverters_out,
+        }
+
+
+_PORTFOLIO_STRINGS_CACHE: tuple[float, dict[str, Any]] | None = None
+_DEVICES_SNAPSHOT_FILE = Path(__file__).resolve().parent.parent / "data" / "processed" / "portfolio_devices.json"
+_STRINGS_SNAPSHOT_FILE = Path(__file__).resolve().parent.parent / "data" / "processed" / "portfolio_strings_snapshot.json"
+
+
+def _compute_string_action(ok: int, low: int, fault: int, night: int) -> tuple[str, str, str]:
+    """Retorna (recommendedType, recommendedLabel, actionDetail) según estado de strings PV."""
+    if fault >= 1:
+        return (
+            "electrica",
+            "⚡ Inspección Eléctrica / Correctivo",
+            f"Revisar {fault} string(s) en rojo (0 A o <40%): verificar fusible DC, conector MC4 desconectado o cable abierto.",
+        )
+    if low >= 2:
+        return (
+            "limpieza",
+            "🧹 Limpieza / Termografía",
+            f"{low} strings amarillos (<75%): programar lavado de paneles, revisión de sombreado o termografía infrarroja.",
+        )
+    if low == 1:
+        return (
+            "limpieza",
+            "🧹 Revisión / Limpieza puntual",
+            "1 string amarillo (<75%): revisar suciedad localizada o sombra puntual en esa cadena.",
+        )
+    if night > 0 and ok == 0:
+        return (
+            "night",
+            "🌙 Reposo nocturno",
+            "Inversores en reposo sin radiación solar. Consultar en ventana solar (07:00–17:00 COT) para medir corriente.",
+        )
+    if ok > 0:
+        return (
+            "ok",
+            "✅ Operación normal",
+            "Todos los strings balanceados y operando en rango óptimo. Sin mantenimiento correctivo requerido.",
+        )
+    return (
+        "pending",
+        "⏳ Esperando lectura PV",
+        "Abrir el detalle de la planta o actualizar en unos segundos para leer telemetría del inversor.",
+    )
+
+
+@app.get("/api/portfolio/strings-summary", tags=["Dispositivos"])
+def get_portfolio_strings_summary() -> dict[str, Any]:
+    """
+    Resumen por planta de salud de strings PV (Verdes, Amarillos, Rojos) y qué hacer
+    según el patrón de falla detectado, con respaldo en snapshot local ante rate-limit 407.
+    """
+    global _PORTFOLIO_STRINGS_CACHE
+    now = time.time()
+    if _PORTFOLIO_STRINGS_CACHE and (now - _PORTFOLIO_STRINGS_CACHE[0]) < 900:
+        return _PORTFOLIO_STRINGS_CACHE[1]
+
+    # 0. Revisar caché fresca en Supabase (25 min día / 4h noche) solo si tiene al menos 10 plantas
+    cot_hour = datetime.now(BOGOTA_TZ).hour
+    ttl_summary = 14400 if (cot_hour >= 18 or cot_hour < 6) else 1500
+    supa_cached, supa_fresh = supabase_store.get_kv_cache("portfolio_strings_summary", max_age_sec=ttl_summary)
+    if supa_cached and supa_fresh and isinstance(supa_cached, dict) and len(supa_cached) >= 10:
+        res_cached = {"success": True, "byPlant": supa_cached}
+        _PORTFOLIO_STRINGS_CACHE = (now, res_cached)
+        return res_cached
+
+    # Cargar snapshots previos (Supabase -> disco) para nunca devolver ceros si Huawei está en 407
+    saved_summary: dict[str, dict[str, Any]] = supa_cached or {}
+    if not saved_summary and _STRINGS_SNAPSHOT_FILE.exists():
+        try:
+            saved_summary = json.loads(_STRINGS_SNAPSHOT_FILE.read_text(encoding="utf-8")) or {}
+        except Exception:
+            saved_summary = {}
+
+    supa_devs, _ = supabase_store.get_kv_cache("portfolio_devices_map", max_age_sec=86400)
+    saved_devs: dict[str, list[str]] = supa_devs or {}
+    if not saved_devs and _DEVICES_SNAPSHOT_FILE.exists():
+        try:
+            saved_devs = json.loads(_DEVICES_SNAPSHOT_FILE.read_text(encoding="utf-8")) or {}
+        except Exception:
+            saved_devs = {}
+
+    summary_map: dict[str, dict[str, Any]] = {}
+    try:
+        try:
+            plants_data = fusion_client.get_plant_list()
+            plants = (plants_data.get("data") or {}).get("list") or []
+        except Exception:
+            plants = []
+        if not plants:
+            last_p = Path(__file__).resolve().parent.parent / "data" / "processed" / "last_plants.json"
+            if last_p.exists():
+                plants = (json.loads(last_p.read_text(encoding="utf-8")).get("data") or {}).get("list") or []
+        plant_codes = [p["plantCode"] for p in plants]
+
+        # 1. Obtener inversores por planta (usar snapshot + consultar faltantes en 1 solo lote; no insistir si 407)
+        missing_codes = [c for c in plant_codes if not saved_devs.get(c)]
+        if missing_codes:
+            try:
+                batch_resp = fusion_client.get_dev_list(",".join(missing_codes[:15]))
+                for d in (batch_resp.get("data") or []):
+                    if d.get("devTypeId") == 1:
+                        sc = str(d.get("stationCode") or "")
+                        if sc:
+                            saved_devs.setdefault(sc, [])
+                            did = str(d["id"])
+                            if did not in saved_devs[sc]:
+                                saved_devs[sc].append(did)
+            except Exception:
+                pass
+            try:
+                _DEVICES_SNAPSHOT_FILE.parent.mkdir(parents=True, exist_ok=True)
+                _DEVICES_SNAPSHOT_FILE.write_text(json.dumps(saved_devs, indent=2), encoding="utf-8")
+            except OSError:
+                pass
+
+        all_dev_ids: list[str] = []
+        dev_to_plant: dict[str, str] = {}
+        for p in plants:
+            pcode = p["plantCode"]
+            for did in saved_devs.get(pcode, []):
+                all_dev_ids.append(did)
+                dev_to_plant[did] = pcode
+
+            prev = saved_summary.get(pcode)
+            summary_map[pcode] = {
+                "plantCode": pcode,
+                "plantName": p.get("plantName", pcode),
+                "ok": prev.get("ok", 0) if prev else 0,
+                "low": prev.get("low", 0) if prev else 0,
+                "fault": prev.get("fault", 0) if prev else 0,
+                "night": prev.get("night", 0) if prev else 0,
+                "total": prev.get("total", 0) if prev else 0,
+                "recommendedType": prev.get("recommendedType", "pending") if prev else "pending",
+                "recommendedLabel": prev.get("recommendedLabel", "⏳ Esperando lectura PV") if prev else "⏳ Esperando lectura PV",
+                "actionDetail": prev.get("actionDetail", _compute_string_action(0, 0, 0, 0)[2]) if prev else _compute_string_action(0, 0, 0, 0)[2],
+            }
+
+        # 2. Consultar KPIs de inversores en lotes de 15
+        kpi_by_id: dict[str, dict[str, Any]] = {}
+        for i in range(0, len(all_dev_ids), 15):
+            batch = all_dev_ids[i:i + 15]
+            try:
+                kpi_resp = fusion_client.get_dev_real_kpi(batch, dev_type=1)
+                for item in (kpi_resp.get("data") or []):
+                    kpi_by_id[str(item.get("devId"))] = item.get("dataItemMap") or {}
+            except Exception:
+                break
+
+        # 3. Recalcular solo para las plantas que sí obtuvieron respuesta fresca
+        updated_plants: dict[str, dict[str, int]] = {}
+        for did, pcode in dev_to_plant.items():
+            dim = kpi_by_id.get(did)
+            if not dim:
+                continue
+            st_counts = updated_plants.setdefault(pcode, {"ok": 0, "low": 0, "fault": 0, "night": 0, "total": 0})
+            raw_strings = []
+            for idx in range(1, 37):
+                u_val = float(dim.get(f"pv{idx}_u") or 0.0)
+                i_val = float(dim.get(f"pv{idx}_i") or 0.0)
+                if u_val > 5.0 or i_val > 0.02:
+                    raw_strings.append(i_val)
+            active_currents = sorted(c for c in raw_strings if c >= 0.2)
+            median_i = active_currents[len(active_currents) // 2] if active_currents else 0.0
+
+            for cur in raw_strings:
+                st_counts["total"] += 1
+                if median_i < 0.3:
+                    st_counts["night"] += 1
+                else:
+                    pct = (cur / median_i) * 100.0
+                    if cur < 0.15 or pct < 40.0:
+                        st_counts["fault"] += 1
+                    elif pct < 75.0:
+                        st_counts["low"] += 1
+                    else:
+                        st_counts["ok"] += 1
+
+        for pcode, counts in updated_plants.items():
+            if counts["total"] > 0:
+                rtype, rlabel, adetail = _compute_string_action(
+                    counts["ok"], counts["low"], counts["fault"], counts["night"]
+                )
+                summary_map[pcode].update({
+                    **counts,
+                    "recommendedType": rtype,
+                    "recommendedLabel": rlabel,
+                    "actionDetail": adetail,
+                })
+
+        try:
+            _STRINGS_SNAPSHOT_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _STRINGS_SNAPSHOT_FILE.write_text(json.dumps(summary_map, indent=2, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+
+        if saved_devs:
+            supabase_store.set_kv_cache("portfolio_devices_map", saved_devs)
+        if updated_plants:
+            supabase_store.set_kv_cache("portfolio_strings_summary", summary_map)
+
+        res = {"success": True, "byPlant": summary_map}
+        _PORTFOLIO_STRINGS_CACHE = (now, res)
+        return res
+    except Exception as exc:
+        logger.debug("Error en /portfolio/strings-summary: %s", exc)
+        return {"success": True, "byPlant": saved_summary or summary_map}
+
+
+def _enrich_alarm_intelligence(
+    alarm_name: str,
+    raw_cause: str,
+    raw_suggestion: str,
+    plant: dict[str, Any] | None,
+    dim: dict[str, Any],
+) -> tuple[str, str]:
+    """
+    Enriquece la causa probable y sugerencia O&M combinando el tipo de falla Huawei
+    con el contexto real de generación hoy (`day_power`), capacidad y hora solar en Colombia.
+    """
+    text = f"{alarm_name} {raw_cause} {raw_suggestion}".lower()
+    day_p = float(dim.get("day_power") or 0.0)
+    cap = float((plant or {}).get("effectiveCapacity_kWp") or (plant or {}).get("capacity") or 0.0)
+    hour_cot = datetime.now(BOGOTA_TZ).hour
+    in_solar_window = 7 <= hour_cot <= 17
+
+    ctx_gen = (
+        f"Hoy registra {day_p:.1f} kWh generados (estuvo inyectando)."
+        if day_p > 0.5
+        else ("Sin generación hoy (0 kWh) en ventana solar." if in_solar_window else "Sin generación hoy (horario nocturno/amanecer).")
+    )
+    impact_note = f" Capacidad afectada: {cap:.1f} kWp." if cap > 0 else ""
+
+    if any(k in text for k in ("offline", "comunicaci", "comm", "disconnect", "smartlogger", "dongle")):
+        cause = (
+            f"Pérdida de enlace entre el SmartLogger/Dongle y FusionSolar. {ctx_gen}{impact_note} "
+            "Suele deberse a corte eléctrico auxiliar en tablero, caída del router/SIM 4G o bloqueo del puerto."
+        )
+        suggestion = (
+            "1) Verificar con cliente si hay energía en el tablero auxiliar y si el router/módem tiene internet. "
+            "2) Si hay energía, reiniciar el SmartLogger/Dongle (desenergizar 30s). "
+            "3) Si day_power sigue en 0 kWh a plena luz solar, programar visita urgente a sitio."
+        )
+    elif any(k in text for k in ("overvoltage", "sobretens", "grid voltage", "tensión de red", "voltaje")):
+        cause = (
+            f"Sobretensión en red AC (el voltaje supera el límite CREG/inversor por alta impedancia de línea o transformador saturado en horas pico). {ctx_gen}"
+        )
+        suggestion = (
+            "1) Medir tensión L-N / L-L en tablero AC al mediodía solar. "
+            "2) Verificar taps del transformador y ajuste de límites de código de red (CREG 174 / Colombia) en el inversor. "
+            "3) Revisar calibre y apriete de borneras AC."
+        )
+    elif any(k in text for k in ("undervoltage", "subtens", "grid loss", "ausencia de red", "falla de red", "utility")):
+        cause = (
+            f"Ausencia o caída de tensión en la red del operador (Celsia) o disparo de totalizador/breaker AC. {ctx_gen}{impact_note}"
+        )
+        suggestion = (
+            "1) Confirmar si hay corte de energía en la finca/planta o si se disparó la protección AC principal. "
+            "2) Inspeccionar relé de protección, DPS AC y fusibles de acometida."
+        )
+    elif any(k in text for k in ("insulation", "aislamiento", "ground", "tierra", "rcd", "residual")):
+        cause = (
+            f"Baja resistencia de aislamiento DC a tierra (posible humedad en conectores MC4, cableado pelado en cubierta o filtración por lluvia). {ctx_gen}"
+        )
+        suggestion = (
+            "1) Medir resistencia de aislamiento (+/- vs tierra) string por string con megóhmetro en campo. "
+            "2) Inspeccionar conectores MC4 en techo, cajas combinadoras y sellado de tubería conduit."
+        )
+    elif any(k in text for k in ("arc", "afci", "arco")):
+        cause = (
+            f"Detección de arco eléctrico DC (AFCI) por falso contacto en conector MC4, fusible o bornera solar. {ctx_gen}"
+        )
+        suggestion = (
+            "1) No rearmar repetidamente sin revisar: inspeccionar termografía/apriete en conectores MC4 y portafusibles DC. "
+            "2) Limpiar sulfatación y re-ponchar conectores recalentados."
+        )
+    elif any(k in text for k in ("temp", "sobrecalent", "fan", "ventil")):
+        cause = (
+            f"Alta temperatura interna en el inversor (ventilador obstruido por polvo/bagazo o flujo de aire insuficiente). {ctx_gen}"
+        )
+        suggestion = (
+            "1) Limpiar disipadores y verificar giro libre de ventiladores externos del inversor. "
+            "2) Comprobar sombra/ventilación del cuarto técnico o caseta."
+        )
+    elif any(k in text for k in ("string", "mppt", "pv", "corriente")):
+        cause = (
+            f"Desbalance o caída de corriente en string/MPPT (fusible DC abierto, sombreado severo, suciedad o falla en cadena de paneles). {ctx_gen}"
+        )
+        suggestion = (
+            "1) Comparar curvas I-V / voltajes y corrientes por MPPT en el detalle de la planta. "
+            "2) Medir Voc e Isc del string afectado y revisar fusibles DC."
+        )
+    else:
+        base_c = raw_cause.strip() if raw_cause else "Evento reportado por el inversor en FusionSolar."
+        base_s = raw_suggestion.strip() if raw_suggestion else "Revisar parámetros DC/AC y registros históricos en el detalle de la planta."
+        cause = f"{base_c} ({ctx_gen}{impact_note})".strip()
+        suggestion = base_s
+
+    return cause, suggestion
+
+
 @app.get("/api/alerts", tags=["Alarmas"])
 def get_alerts() -> dict[str, Any]:
     """
@@ -364,9 +826,17 @@ def get_alerts() -> dict[str, Any]:
         plants_data = fusion_client.get_plant_list()
         plants = plants_data.get("data", {}).get("list", [])
         plant_codes = [p["plantCode"] for p in plants]
+        plant_by_code = {p["plantCode"]: p for p in plants}
         plant_name_by_code = {p["plantCode"]: p["plantName"] for p in plants}
 
         now_ms = int(time.time() * 1000)
+
+        kpi_data = fusion_client.get_station_real_kpi(plant_codes)
+        kpi_list = kpi_data.get("data", []) or []
+        kpi_map = {
+            (k.get("plantCode") or k.get("stationCode")): k.get("dataItemMap", {})
+            for k in kpi_list
+        }
 
         data = fusion_client.get_alarm_list(plant_codes)
         alarms = data.get("data", []) or []
@@ -376,23 +846,24 @@ def get_alerts() -> dict[str, Any]:
         for alarm in alarms:
             scode = alarm.get("stationCode", "")
             codes_with_alarm.add(scode)
+            aname = alarm.get("alarmName", "Alarma activa de inversor")
+            cause, suggestion = _enrich_alarm_intelligence(
+                aname,
+                alarm.get("alarmCause", ""),
+                alarm.get("repairSuggestion", ""),
+                plant_by_code.get(scode),
+                kpi_map.get(scode, {}),
+            )
             formatted_alarms.append({
                 "alarmId": str(alarm.get("alarmId", "") or alarm.get("id", "")),
-                "alarmName": alarm.get("alarmName", "Alarma activa de inversor"),
-                "alarmCause": alarm.get("alarmCause", "Falla en dispositivo reportada en FusionSolar"),
+                "alarmName": aname,
+                "alarmCause": cause,
                 "stationCode": plant_name_by_code.get(scode, scode),
                 "plantCode": scode,
                 "devName": alarm.get("devName", "Inversor / Dispositivo"),
-                "repairSuggestion": alarm.get("repairSuggestion", "Verificar estado y ventilación del inversor."),
+                "repairSuggestion": suggestion,
                 "raiseTime": alarm.get("raiseTime", now_ms),
             })
-
-        kpi_data = fusion_client.get_station_real_kpi(plant_codes)
-        kpi_list = kpi_data.get("data", []) or []
-        kpi_map = {
-            (k.get("plantCode") or k.get("stationCode")): k.get("dataItemMap", {})
-            for k in kpi_list
-        }
 
         for p in plants:
             pcode = p["plantCode"]
@@ -401,26 +872,36 @@ def get_alerts() -> dict[str, Any]:
             health = dim.get("real_health_state")
 
             if kpi_domain.is_plant_offline(health):  # 1 = Offline
+                cause, suggestion = _enrich_alarm_intelligence(
+                    "Pérdida de Comunicación (Offline)", "", "", p, dim
+                )
                 formatted_alarms.append({
                     "alarmId": f"offline_{pcode}",
                     "alarmName": "Pérdida de Comunicación (Offline)",
-                    "alarmCause": "La planta solar ha dejado de transmitir telemetría a FusionSolar.",
+                    "alarmCause": cause,
                     "stationCode": pname,
                     "plantCode": pcode,
                     "devName": "Registrador / SmartLogger / Dongle",
-                    "repairSuggestion": "Revisar alimentación eléctrica del registrador de datos y el estado de la conexión a Internet local (router/modem).",
+                    "repairSuggestion": suggestion,
                     "raiseTime": now_ms,
                 })
             elif kpi_domain.is_plant_faulty(health):  # 2 = Falla / Alarma
                 if pcode not in codes_with_alarm:
+                    cause, suggestion = _enrich_alarm_intelligence(
+                        "Alarma Operativa Activa",
+                        "Un dispositivo en la planta reporta fallas en sus parámetros de salud.",
+                        "Ingresar al detalle de la planta para revisar dispositivos, curvas MPPT y estado DC/AC.",
+                        p,
+                        dim,
+                    )
                     formatted_alarms.append({
                         "alarmId": f"health_alarm_{pcode}",
                         "alarmName": "Alarma Operativa Activa",
-                        "alarmCause": "Un dispositivo en la planta reporta fallas en sus parámetros de salud.",
+                        "alarmCause": cause,
                         "stationCode": pname,
                         "plantCode": pcode,
                         "devName": "Planta General",
-                        "repairSuggestion": "Ingresar al panel de detalle de la planta para diagnosticar el inversor o módulo en alarma.",
+                        "repairSuggestion": suggestion,
                         "raiseTime": now_ms,
                     })
 
@@ -1295,6 +1776,7 @@ def preview_plant_report(safe_name: str) -> HTMLResponse:
         logo_src=logo_b64,
         power_chart_src=pwr_b64,
         monthly_chart_src=mon_b64,
+        month_data=month_s,
     )
     return HTMLResponse(content=html_str)
 

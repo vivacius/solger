@@ -13,6 +13,8 @@ export interface Plant {
   gridConnectionDate: string | null;
   contactPerson: string | null;
   contactMethod: string | null;
+  satelliteGhi_kWh_m2?: number;
+  cloudCover_pct?: number;
 }
 
 export interface KpiDataItemMap {
@@ -48,6 +50,9 @@ export interface PortfolioSummary {
   totalEnergyMonth_kWh: number;
   totalEnergyTotal_kWh: number;
   co2Avoided_ton: number;
+  satelliteHspToday_h?: number;
+  satelliteIrradiance_W_m2?: number;
+  cloudCover_pct?: number;
 }
 
 export interface SummaryResponse {

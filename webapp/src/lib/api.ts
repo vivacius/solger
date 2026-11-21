@@ -26,6 +26,24 @@ export const api = {
   /** Resumen global del portafolio */
   getSummary: () => apiFetch<SummaryResponse>('/plants/summary'),
 
+  /** Sumatoria diaria de generación del portafolio (últimos N días) */
+  getPortfolioDaily: (days = 30) =>
+    apiFetch<{ success: boolean; days: number; series: Array<{ date: string; gen_kwh: number; plants_count: number }> }>(
+      `/portfolio/daily-generation?days=${days}`
+    ),
+
+  /** Malla horaria de irradiancia satelital (Open-Meteo) para el mapa */
+  getIrradianceGrid: () =>
+    apiFetch<{
+      success: boolean;
+      source: string;
+      times: string[];
+      defaultIndex: number;
+      dLat: number;
+      dLon: number;
+      points: Array<{ lat: number; lon: number; radiation: number[]; cloud: number[] }>;
+    }>('/satellite/irradiance-grid'),
+
   /** Lista de plantas */
   getPlants: () => apiFetch<PlantsResponse>('/plants'),
 
@@ -48,6 +66,54 @@ export const api = {
   /** Lista de dispositivos de una planta */
   getPlantDevices: (plantCode: string) =>
     apiFetch<DevicesResponse>(`/plants/${encodePlantCode(plantCode)}/devices`),
+
+  /** Resumen de salud de strings PV (verdes/amarillos/rojos) por planta */
+  getPortfolioStringsSummary: () =>
+    apiFetch<{
+      success: boolean;
+      byPlant: Record<
+        string,
+        {
+          plantCode: string;
+          plantName: string;
+          ok: number;
+          low: number;
+          fault: number;
+          night: number;
+          total: number;
+          recommendedType: string;
+          recommendedLabel: string;
+          actionDetail?: string;
+        }
+      >;
+    }>('/portfolio/strings-summary'),
+
+  /** Distribución en vivo de inversores y strings (PV1..PV36) de una planta */
+  getPlantStrings: (plantCode: string) =>
+    apiFetch<{
+      success: boolean;
+      plantCode: string;
+      source: string;
+      inverters: Array<{
+        id: string;
+        name: string;
+        model: string;
+        efficiency: number;
+        temperature: number;
+        activePower_kw: number;
+        mpptPower_kw: number;
+        medianCurrent_a: number;
+        strings: Array<{
+          index: number;
+          id: string;
+          voltage_v: number;
+          current_a: number;
+          power_w: number;
+          status: 'ok' | 'low' | 'fault' | 'night';
+          pct_vs_median: number | null;
+        }>;
+      }>;
+    }>(`/plants/${encodePlantCode(plantCode)}/strings`),
 
   /** Alarmas activas de todas las plantas */
   getAlerts: () => apiFetch<AlertsResponse>('/alerts'),

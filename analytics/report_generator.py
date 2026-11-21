@@ -684,9 +684,10 @@ def build_executive_html_report(
     active_p   = summary.get("activePlants", 0)
     n_plants   = summary.get("totalPlants", len(plants))
 
-    # ── Rendimiento por planta ───────────────────────────────────────────────
+    # ── Rendimiento por planta + CREG 174 portafolio ──────────────────────────
     plants_perf = []
     hsp_list    = []
+    port_exp = port_self = port_buy = port_exc1 = port_exc2 = port_net_buy = 0.0
     for p in plants:
         dim   = kpi_map.get(p.get("plantCode"), {})
         raw_cap = float(p.get("capacity") or 0)
@@ -694,6 +695,22 @@ def build_executive_html_report(
         day_p = float(dim.get("day_power") or 0)
         health = dim.get("real_health_state", 0)
         cap_est = bool(p.get("capacityEstimated")) or (raw_cap <= 0 and cap > 0)
+
+        p_exp = min(max(0.0, float(dim.get("day_on_grid_energy") or 0)), day_p)
+        p_self = max(0.0, day_p - p_exp)
+        p_load = float(dim.get("day_use_energy") or 0)
+        if p_load <= 0:
+            p_load = p_self
+        p_buy = max(0.0, p_load - p_self)
+        p_e1 = min(p_exp, p_buy)
+        p_e2 = max(0.0, p_exp - p_buy)
+        p_nb = max(0.0, p_buy - p_e1)
+        port_exp += p_exp
+        port_self += p_self
+        port_buy += p_buy
+        port_exc1 += p_e1
+        port_exc2 += p_e2
+        port_net_buy += p_nb
 
         hsp_real = None
         pr       = None
@@ -971,6 +988,16 @@ def build_executive_html_report(
       <table width="100%" cellpadding="0" cellspacing="0"><tr>{kpi_cells}</tr></table>
     </td>
   </tr>
+  <tr>
+    <td style="padding:10px 28px;background:#F1F5F9;border-bottom:1px solid rgba(15,23,42,0.06);font-size:11px;color:{C_MUTED};">
+      <strong style="color:{C_DARK};">CREG 174 Portafolio (Hoy):</strong>
+      &nbsp; Autoconsumo <strong style="color:#3D8A1F;">{port_self:.1f} kWh</strong>
+      &nbsp;·&nbsp; Inyectado Red <strong style="color:#1A8A92;">{port_exp:.1f} kWh</strong>
+      &nbsp;·&nbsp; Exc. Tipo 1 <strong style="color:#3D8A1F;">{port_exc1:.1f} kWh</strong>
+      &nbsp;·&nbsp; Exc. Tipo 2 <strong style="color:#1A8A92;">{port_exc2:.1f} kWh</strong>
+      &nbsp;·&nbsp; Neto Red <strong style="color:{C_RED if port_net_buy > 0 else '#3D8A1F'};">{port_net_buy:.1f} kWh</strong>
+    </td>
+  </tr>
 
   <!-- ═══ CONTEXTO MENSUAL ════════════════════════════════════════════════════ -->
   <tr><td style="padding-top:16px;">{month_ctx}</td></tr>
@@ -1129,6 +1156,7 @@ def build_plant_html_report(
     logo_src: str = "cid:logo",
     power_chart_src: str = "cid:power_chart",
     monthly_chart_src: str = "cid:monthly_chart",
+    month_data: list | None = None,
 ) -> str:
     """Reporte HTML individual por planta (para correo técnico)."""
     now_str    = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -1148,10 +1176,29 @@ def build_plant_html_report(
     if load_today <= 0:
         load_today = self_today
     buy_today  = max(0.0, load_today - self_today)
+    exc1_today = min(export_today, buy_today)
+    exc2_today = max(0.0, export_today - buy_today)
+    net_buy_today = max(0.0, buy_today - exc1_today)
     self_suf   = (self_today / load_today * 100) if load_today > 0 else 0
     self_rate  = (self_today / day_power * 100)  if day_power > 0  else 0
     co2        = round(total_power * 0.000220, 2)
     health     = kpi_dim.get("real_health_state", 3)
+
+    # Resumen acumulado del mes (CREG 174)
+    m_items = month_data or []
+    m_gen = m_exp = m_self = m_buy = 0.0
+    for it in m_items:
+        d = (it.get("dataItemMap") or {})
+        g = max(0.0, float(d.get("inverter_power") or d.get("inverterYield") or d.get("PVYield") or 0))
+        e = min(max(0.0, float(d.get("ongrid_power") or 0)), g)
+        su = min(float(d.get("selfUsePower") or d.get("selfProvide") or max(0.0, g - e)), g)
+        b = max(0.0, float(d.get("buyPower") or d.get("buy_power") or 0))
+        m_gen += g; m_exp += e; m_self += su; m_buy += b
+    m_load = m_self + m_buy
+    m_exc1 = min(m_exp, m_buy)
+    m_exc2 = max(0.0, m_exp - m_buy)
+    m_net_buy = max(0.0, m_buy - m_exc1)
+    m_days = len(m_items)
 
     sl, sc, sb = "Operativa", "#3D8A1F", "#E6F5DC"
     if health == 2: sl, sc, sb = "Alarma",  "#D4A10A", "#FEF8E0"
@@ -1220,8 +1267,12 @@ body{{font-family:'Segoe UI',sans-serif;background:{C_BG};color:{C_DARK};margin:
             <div style="font-size:9px;color:#3D8A1F;margin-top:2px;">{self_suf:.0f}% solar</div>
           </div>
           <div style="background:rgba(36,165,174,0.05);border:1px solid rgba(36,165,174,0.18);border-radius:8px;padding:8px;text-align:center;margin-top:6px;">
-            <div style="font-size:9px;font-weight:700;color:#1A8A92;text-transform:uppercase;">Excedentes</div>
+            <div style="font-size:9px;font-weight:700;color:#1A8A92;text-transform:uppercase;">Excedentes CREG 174</div>
             <div style="font-size:14px;font-weight:800;color:{C_DARK};margin-top:3px;">{export_today:.1f} kWh</div>
+            <div style="font-size:9px;color:{C_MUTED};margin-top:3px;line-height:1.35;">
+              Tipo 1: <strong style="color:#3D8A1F;">{exc1_today:.1f}</strong> · Tipo 2: <strong style="color:#1A8A92;">{exc2_today:.1f}</strong><br/>
+              Neto Red: <strong style="color:{C_RED if net_buy_today > 0 else '#3D8A1F'};">{net_buy_today:.1f} kWh</strong>
+            </div>
           </div>
         </td>
       </tr>
@@ -1234,6 +1285,16 @@ body{{font-family:'Segoe UI',sans-serif;background:{C_BG};color:{C_DARK};margin:
   <div style="padding:14px 20px 0;">
     <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:{C_MUTED};margin-bottom:8px;">Balance de Energía — Mes Actual</div>
     <img src="{monthly_chart_src}" style="width:100%;border-radius:6px;border:1px solid rgba(15,23,42,0.06);" alt="Balance mensual" />
+    {f'''<div style="margin-top:8px;padding:8px 12px;border-radius:8px;background:#F8FAFC;border:1px solid rgba(15,23,42,0.08);font-size:10.5px;color:{C_MUTED};display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <span><strong>Acumulado del Mes ({m_days}d · CREG 174):</strong></span>
+      <span>Gen: <strong style="color:#D4A10A;">{m_gen:.1f} kWh</strong></span>
+      <span>Autoconsumo: <strong style="color:#3D8A1F;">{m_self:.1f} kWh</strong></span>
+      <span>Importado: <strong style="color:#DC2626;">{m_buy:.1f} kWh</strong></span>
+      <span>Consumo: <strong style="color:{C_DARK};">{m_load:.1f} kWh</strong></span>
+      <span>Exc. Tipo 1: <strong style="color:#3D8A1F;">{m_exc1:.1f} kWh</strong></span>
+      <span>Exc. Tipo 2: <strong style="color:#1A8A92;">{m_exc2:.1f} kWh</strong></span>
+      <span>Neto Red: <strong style="color:{C_RED if m_net_buy > 0 else '#3D8A1F'};">{m_net_buy:.1f} kWh</strong></span>
+    </div>''' if m_days > 0 else ''}
   </div>
   <div style="padding:14px 20px 18px;">
     <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:{C_MUTED};margin-bottom:8px;">Información del Activo</div>
@@ -1498,6 +1559,7 @@ def run_report_pipeline(
                 logo_src=logo_b64 or "cid:logo",
                 power_chart_src=pwr_b64 or "cid:power_chart",
                 monthly_chart_src=mon_b64 or "cid:monthly_chart",
+                month_data=month_s,
             )
             plant_file_path = os.path.join(plants_dir, f"{safe}.html")
             _safe_write_text(plant_file_path, p_html_file)
