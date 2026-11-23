@@ -90,10 +90,10 @@ def run_hourly_etl_and_alerts() -> dict:
                 time.sleep(1.8)
         supabase_store.set_kv_cache("etl_last_monthly_backfill", {"ts": now_cot.isoformat()})
 
-    # 3. Actualizar resumen de strings PV en Supabase para Mantenimiento y Vercel
+    # 3. Actualizar resumen de strings PV + cache por planta en Supabase
     try:
         backend_main._PORTFOLIO_STRINGS_CACHE = None
-        backend_main.get_portfolio_strings_summary()
+        backend_main.get_portfolio_strings_summary(force=True)
     except Exception as exc:
         print(f"[ETL SOLGER] Aviso actualizando resumen de strings PV: {exc}")
 

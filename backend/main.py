@@ -404,8 +404,67 @@ def get_plant_devices(plant_code: str) -> dict[str, Any]:
     }
 
 
+def _classify_inverter_strings(
+    did: str,
+    name: str,
+    model: str,
+    dim: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """Clasifica los strings PV1..PV36 de un inversor respecto a su mediana activa."""
+    raw_strings: list[dict[str, Any]] = []
+    for idx in range(1, 37):
+        u_val = float(dim.get(f"pv{idx}_u") or 0.0)
+        i_val = float(dim.get(f"pv{idx}_i") or 0.0)
+        if u_val > 5.0 or i_val > 0.02:
+            raw_strings.append({
+                "index": idx,
+                "id": f"PV{idx}",
+                "voltage_v": round(u_val, 1),
+                "current_a": round(i_val, 2),
+                "power_w": round(u_val * i_val, 0),
+            })
+
+    active_currents = sorted(s["current_a"] for s in raw_strings if s["current_a"] >= 0.2)
+    median_i = active_currents[len(active_currents) // 2] if active_currents else 0.0
+
+    counts = {"ok": 0, "low": 0, "fault": 0, "night": 0, "total": 0}
+    strings_classified = []
+    for s in raw_strings:
+        cur = s["current_a"]
+        counts["total"] += 1
+        if median_i < 0.3:
+            status = "night"
+            pct = None
+            counts["night"] += 1
+        else:
+            pct = round((cur / median_i) * 100, 0)
+            if cur < 0.15 or pct < 40:
+                status = "fault"
+                counts["fault"] += 1
+            elif pct < 75:
+                status = "low"
+                counts["low"] += 1
+            else:
+                status = "ok"
+                counts["ok"] += 1
+        strings_classified.append({**s, "status": status, "pct_vs_median": pct})
+
+    inv_obj = {
+        "id": did,
+        "name": name or f"Inversor {did}",
+        "model": model or "",
+        "efficiency": round(float(dim.get("efficiency") or 0.0), 2),
+        "temperature": round(float(dim.get("temperature") or 0.0), 1),
+        "activePower_kw": round(float(dim.get("active_power") or 0.0), 2),
+        "mpptPower_kw": round(float(dim.get("mppt_power") or 0.0), 2),
+        "medianCurrent_a": round(median_i, 2),
+        "strings": strings_classified,
+    }
+    return inv_obj, counts
+
+
 @app.get("/api/plants/{plant_code}/strings", tags=["Dispositivos"])
-def get_plant_strings(plant_code: str) -> dict[str, Any]:
+def get_plant_strings(plant_code: str, force: bool = Query(default=False)) -> dict[str, Any]:
     """
     Telemetría en vivo por inversor y por cada string fotovoltaico (PV1..PV36),
     con caché en Supabase (`solger.sync_cursor`) para evitar rate-limit 407 en Vercel.
@@ -413,11 +472,12 @@ def get_plant_strings(plant_code: str) -> dict[str, Any]:
     decoded_code = plant_code.replace("__", "=")
     kv_key = f"plant_strings_{decoded_code}"
 
-    # 1. Revisar caché fresca en Supabase (20 min, o 4h de noche) solo si tiene strings válidos
+    # 1. Revisar caché en Supabase (20 min día / 24h noche) solo si tiene strings válidos
     cot_hour = datetime.now(BOGOTA_TZ).hour
-    ttl_plant = 14400 if (cot_hour >= 18 or cot_hour < 6) else 1200
+    is_night = cot_hour >= 18 or cot_hour < 6
+    ttl_plant = 86400 if is_night else 1200
     cached_plant, is_fresh = supabase_store.get_kv_cache(kv_key, max_age_sec=ttl_plant)
-    if cached_plant and is_fresh and any(inv.get("strings") for inv in (cached_plant.get("inverters") or [])):
+    if not force and cached_plant and is_fresh and any(inv.get("strings") for inv in (cached_plant.get("inverters") or [])):
         return cached_plant
 
     inverters_out: list[dict[str, Any]] = []
@@ -461,49 +521,13 @@ def get_plant_strings(plant_code: str) -> dict[str, Any]:
         for d in devs:
             did = str(d["id"])
             dim = kpi_by_id.get(did, {})
-            raw_strings: list[dict[str, Any]] = []
-            for idx in range(1, 37):
-                u_val = float(dim.get(f"pv{idx}_u") or 0.0)
-                i_val = float(dim.get(f"pv{idx}_i") or 0.0)
-                if u_val > 5.0 or i_val > 0.02:
-                    raw_strings.append({
-                        "index": idx,
-                        "id": f"PV{idx}",
-                        "voltage_v": round(u_val, 1),
-                        "current_a": round(i_val, 2),
-                        "power_w": round(u_val * i_val, 0),
-                    })
-
-            active_currents = sorted(s["current_a"] for s in raw_strings if s["current_a"] >= 0.2)
-            median_i = active_currents[len(active_currents) // 2] if active_currents else 0.0
-
-            strings_classified = []
-            for s in raw_strings:
-                cur = s["current_a"]
-                if median_i < 0.3:
-                    status = "night"
-                    pct = None
-                else:
-                    pct = round((cur / median_i) * 100, 0)
-                    if cur < 0.15 or pct < 40:
-                        status = "fault"
-                    elif pct < 75:
-                        status = "low"
-                    else:
-                        status = "ok"
-                strings_classified.append({**s, "status": status, "pct_vs_median": pct})
-
-            inverters_out.append({
-                "id": did,
-                "name": d.get("devName") or f"Inversor {did}",
-                "model": d.get("model") or d.get("invType") or "",
-                "efficiency": round(float(dim.get("efficiency") or 0.0), 2),
-                "temperature": round(float(dim.get("temperature") or 0.0), 1),
-                "activePower_kw": round(float(dim.get("active_power") or 0.0), 2),
-                "mpptPower_kw": round(float(dim.get("mppt_power") or 0.0), 2),
-                "medianCurrent_a": round(median_i, 2),
-                "strings": strings_classified,
-            })
+            inv_obj, _ = _classify_inverter_strings(
+                did,
+                d.get("devName") or f"Inversor {did}",
+                d.get("model") or d.get("invType") or "",
+                dim,
+            )
+            inverters_out.append(inv_obj)
 
         has_strings = any(inv.get("strings") for inv in inverters_out)
         if not has_strings and cached_plant and any(inv.get("strings") for inv in (cached_plant.get("inverters") or [])):
@@ -593,21 +617,21 @@ def _compute_string_action(ok: int, low: int, fault: int, night: int) -> tuple[s
 
 
 @app.get("/api/portfolio/strings-summary", tags=["Dispositivos"])
-def get_portfolio_strings_summary() -> dict[str, Any]:
+def get_portfolio_strings_summary(force: bool = Query(default=False)) -> dict[str, Any]:
     """
     Resumen por planta de salud de strings PV (Verdes, Amarillos, Rojos) y qué hacer
-    según el patrón de falla detectado, con respaldo en snapshot local ante rate-limit 407.
+    según el patrón de falla detectado, con respaldo en Supabase ante rate-limit 407.
     """
     global _PORTFOLIO_STRINGS_CACHE
     now = time.time()
-    if _PORTFOLIO_STRINGS_CACHE and (now - _PORTFOLIO_STRINGS_CACHE[0]) < 900:
+    if not force and _PORTFOLIO_STRINGS_CACHE and (now - _PORTFOLIO_STRINGS_CACHE[0]) < 900:
         return _PORTFOLIO_STRINGS_CACHE[1]
 
-    # 0. Revisar caché fresca en Supabase (25 min día / 4h noche) solo si tiene al menos 10 plantas
+    # 0. Revisar caché fresca en Supabase (25 min día / 12h noche) solo si tiene al menos 10 plantas
     cot_hour = datetime.now(BOGOTA_TZ).hour
-    ttl_summary = 14400 if (cot_hour >= 18 or cot_hour < 6) else 1500
+    ttl_summary = 43200 if (cot_hour >= 18 or cot_hour < 6) else 1500
     supa_cached, supa_fresh = supabase_store.get_kv_cache("portfolio_strings_summary", max_age_sec=ttl_summary)
-    if supa_cached and supa_fresh and isinstance(supa_cached, dict) and len(supa_cached) >= 10:
+    if not force and supa_cached and supa_fresh and isinstance(supa_cached, dict) and len(supa_cached) >= 10:
         res_cached = {"success": True, "byPlant": supa_cached}
         _PORTFOLIO_STRINGS_CACHE = (now, res_cached)
         return res_cached
@@ -697,32 +721,28 @@ def get_portfolio_strings_summary() -> dict[str, Any]:
 
         # 3. Recalcular solo para las plantas que sí obtuvieron respuesta fresca
         updated_plants: dict[str, dict[str, int]] = {}
+        plant_inverters: dict[str, list[dict[str, Any]]] = {}
         for did, pcode in dev_to_plant.items():
             dim = kpi_by_id.get(did)
             if not dim:
                 continue
+            inv_obj, inv_counts = _classify_inverter_strings(did, f"Inversor {did}", "", dim)
+            plant_inverters.setdefault(pcode, []).append(inv_obj)
             st_counts = updated_plants.setdefault(pcode, {"ok": 0, "low": 0, "fault": 0, "night": 0, "total": 0})
-            raw_strings = []
-            for idx in range(1, 37):
-                u_val = float(dim.get(f"pv{idx}_u") or 0.0)
-                i_val = float(dim.get(f"pv{idx}_i") or 0.0)
-                if u_val > 5.0 or i_val > 0.02:
-                    raw_strings.append(i_val)
-            active_currents = sorted(c for c in raw_strings if c >= 0.2)
-            median_i = active_currents[len(active_currents) // 2] if active_currents else 0.0
+            for k in ("ok", "low", "fault", "night", "total"):
+                st_counts[k] += inv_counts[k]
 
-            for cur in raw_strings:
-                st_counts["total"] += 1
-                if median_i < 0.3:
-                    st_counts["night"] += 1
-                else:
-                    pct = (cur / median_i) * 100.0
-                    if cur < 0.15 or pct < 40.0:
-                        st_counts["fault"] += 1
-                    elif pct < 75.0:
-                        st_counts["low"] += 1
-                    else:
-                        st_counts["ok"] += 1
+        for pcode, invs in plant_inverters.items():
+            if any(inv.get("strings") for inv in invs):
+                supabase_store.set_kv_cache(
+                    f"plant_strings_{pcode}",
+                    {
+                        "success": True,
+                        "plantCode": pcode,
+                        "source": "fusionsolar_live",
+                        "inverters": invs,
+                    },
+                )
 
         for pcode, counts in updated_plants.items():
             if counts["total"] > 0:
